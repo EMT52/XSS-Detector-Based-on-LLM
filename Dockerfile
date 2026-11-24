@@ -61,6 +61,7 @@ WORKDIR /workspace/XSS
 RUN chown -R xss:xss /opt/neo4j /workspace/XSS \
     && dpkg-query -W > /usr/local/share/xss/os-packages.txt \
     && python3 -m pip freeze > /usr/local/share/xss/python-packages.txt
+ENV XSS_WEB_ROOT=/workspace/XSS/.docker-state/www XSS_CONTAINER=1
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
     CMD curl --fail --silent http://127.0.0.1/__xss_health.php || exit 1

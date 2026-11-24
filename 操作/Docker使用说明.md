@@ -24,6 +24,36 @@ Neo4j 4.4.37 的临时认证初始化已确认接受密码 `1`。全部下载输
 SHA256，Chrome ZIP 另通过完整 CRC 检查。
 这组证据验证了示例和检查逻辑，不能替代容器内的完整检查。
 
+## 推荐方式：进入 Bash，逐条运行命令
+
+镜像发布成功后，换机器只需安装 Docker、取得源码和拉取镜像，不需要重新编译依赖。
+宿主机执行：
+
+```bash
+git clone https://github.com/EMT52/XSS-Detector-Based-on-LLM.git
+cd XSS-Detector-Based-on-LLM
+./进入环境.sh --pull
+```
+
+这会启动后台环境并进入普通 Bash。以后的再次进入只需 `./进入环境.sh`。
+进入时不会自动跑实验；可以自由 `cd`，使用 Python、PHP、Java，执行自己的脚本：
+
+```bash
+pwd                           # /workspace/XSS
+python --version
+php --version
+cd phpjoern
+./php2ast /workspace/XSS/php-app
+```
+
+接着按 [容器内手动实验](手动实验.md) 分步执行 TChecker、导入数据库、
+提取 PUT 和浏览器测试。每步都可以检查结果、修改代码再重跑。
+容器默认工作目录、解释器 PATH、Neo4j 凭据和 Web 目录已设置好。
+代码、待测应用和实验输出仍是宿主机文件。
+
+`exit` 只退出当前终端；宿主机运行 `docker compose down` 停止后台环境。
+Compose 用于管理环境，日常实验在容器 Bash 内直接执行普通命令。
+
 ## 固定的版本
 
 | 组件 | 版本或锁定方式 |
@@ -72,21 +102,21 @@ docker build --network=host \
 `UBUNTU_MIRROR` 只替换 Ubuntu 软件源地址，仍验证 Ubuntu 的签名；不指定时使用原始源。
 这属于当前 Linux 主机的联网设置；普通可直连主机仍可使用下面的 Compose 构建命令。
 
-在项目根目录执行，先将一个待测应用的源码放进 `php-app/`：
+只有修改运行依赖或需要自行构建时，才执行 `docker compose build`。
+本机已构建的镜像可在忽略上传的 `.env` 中设置 `XSS_IMAGE=xss-env:local`。
+先将一个待测应用的源码放进 `php-app/`，进入 Bash 后也可以选用现有准备脚本：
 
 ```bash
-cp .env.example .env
-docker compose build
-docker compose up -d
-docker compose ps
-docker compose exec --user xss lab xss versions
-docker compose exec --user xss lab xss check
-docker compose exec --user xss lab xss prepare
-docker compose exec --user xss lab xss fuzz --output output/php-app.json
+./进入环境.sh
+# 以下在容器 Bash 内执行
+./prepare_step7.sh --check-only
+./prepare_step7.sh
+cd llm-xss/PUT_fuzzer
+python PUT_fuzzer.py --output output/php-app.json
 ```
 
-`prepare` 沿用原步骤 1～6，完成后部署 PUT，停在步骤 7 入口。
-`fuzz` 才执行浏览器测试。结果保存在本机
+`prepare_step7.sh` 沿用原步骤 1～6，完成后部署 PUT，停在步骤 7 入口。
+手动运行 `PUT_fuzzer.py` 才执行浏览器测试。结果保存在本机
 `llm-xss/PUT_fuzzer/output/php-app.json`，每批准备记录在 `runs/preparation/`。
 容器 Web 根目录位于 `.docker-state/www/`，与本批次备份保持在同一文件系统，
 避免跨文件系统的目录重命名失败。Apache 与浏览器在同一容器中，保留原代码的
@@ -104,14 +134,14 @@ Linux 下若文件所属 UID/GID 不是 1000，在 `.env` 设置 `XSS_UID`、`XS
 单独编译可用：
 
 ```bash
-docker compose exec --user xss lab xss rebuild
+xss rebuild
 ```
 
-更换 `php-app/` 内的应用，执行 `xss prepare`，随后执行 `xss fuzz`。
+更换 `php-app/` 内的应用，按手动实验指南逐步执行，或自行运行准备脚本后再运行 fuzzer。
 也可以把多个应用放在本机 `apps/`，逐个指定：
 
 ```bash
-docker compose exec --user xss lab xss prepare --app /workspace/XSS/apps/my-app
+./prepare_step7.sh --app /workspace/XSS/apps/my-app
 ```
 
 当前共享输出及 Web 部署名称仍统一为 `php-app`，新一次准备会替换上一共享结果，
@@ -181,7 +211,7 @@ docker run --rm --shm-size=1g \
 目录，会替换该目录的共享 PUT；需要保留正式部署时，先复制一份源码目录用于检查。
 原 `llm-xss/php-instr.tar.gz` 实际是 Software Heritage 的文件缺失提示。
 默认普通 PHP 镜像可用于上述流程，但不能宣称完整复现论文插桩反馈机制。
-真实插桩源码的接入方法见 `docker/vendor/README.md`；提供源码后仍需单独验证反馈内容。
+真实插桩源码的接入方法见 [插桩源码接入](../docker/vendor/README.md)；提供源码后仍需单独验证反馈内容。
 
 ## GitHub 与镜像同步
 

@@ -26,7 +26,7 @@ class PublishBoundaries(unittest.TestCase):
                         self.assertFalse(publisher.selected(root / name))
                 for name in ('TChecker/projects/extensions/StaticAnalysis.java',
                              'phpjoern/src/Parser.php', 'docker/requirements.lock',
-                             '.env.example', '操作指南.md'):
+                             '.env.example', '操作/操作指南.md'):
                     self.assertTrue(publisher.selected(root / name))
 
     def test_key_detection_reports_location_without_value(self):

@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PUT fuzzer with LLM enhancement")
-    parser.add_argument('--test_path', type=str, default="/var/www/html/", help='The path where the PUTs are placed (usually the web directory, which is /var/ww/html by default)')
+    parser.add_argument('--test_path', type=str,
+                        default=os.environ.get('XSS_WEB_ROOT', '/var/www/html/'),
+                        help='PUT web directory; defaults to XSS_WEB_ROOT or /var/www/html/')
     parser.add_argument('--output', default='output/results.json',
                        help='Current-run JSON output path; previous contents are archived')
     parser.add_argument('--enable_llm', action='store_true',

@@ -27,7 +27,7 @@ sudo JAVA_HOME=/home/lgc/jdk-25.0.2 /opt/neo4j/bin/neo4j console
 /opt/neo4j/bin/neo4j --version
 
 # 密码
-Neo4J#7880!=
+1
 
 
 cp -r /opt/neo4j /home/lgc/XSSKy/PUT_extractor/databases

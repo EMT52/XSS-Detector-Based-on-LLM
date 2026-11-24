@@ -441,7 +441,8 @@ def main():
     parser = argparse.ArgumentParser(description='一键重建步骤 1–6，部署后停在步骤 7 入口')
     parser.add_argument('--app', type=Path, default=ROOT / 'php-app', help='待测 PHP 应用目录')
     parser.add_argument('--java-home', default=os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-11-openjdk-amd64'))
-    parser.add_argument('--java-heap', default='8G', help='TChecker 堆上限，默认 8G，与操作指南一致')
+    parser.add_argument('--java-heap', default=os.environ.get('JAVA_HEAP', '8G'),
+                        help='TChecker 堆上限，读取 JAVA_HEAP，未设置时为 8G')
     parser.add_argument('--neo4j-home', default='/opt/neo4j', help='Neo4j 4.4 安装模板')
     parser.add_argument('--neo4j-config', type=Path,
                         default=Path(os.environ.get('XSS_NEO4J_CONFIG',
@@ -450,7 +451,8 @@ def main():
     parser.add_argument('--neo4j-auth', type=Path,
                         default=os.environ.get('XSS_NEO4J_AUTH'),
                         help='指定初始认证文件，不复用其他环境的认证')
-    parser.add_argument('--web-root', type=Path, default=Path('/var/www/html'))
+    parser.add_argument('--web-root', type=Path,
+                        default=Path(os.environ.get('XSS_WEB_ROOT', '/var/www/html')))
     parser.add_argument('--skip-deploy', action='store_true', help='仅完成步骤 1–6')
     parser.add_argument('--no-publish', action='store_true', help='验证用：不更新共享 PUT/污点路径文件')
     parser.add_argument('--check-only', action='store_true', help='仅检查依赖和配置')

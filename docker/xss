@@ -73,7 +73,7 @@ def main(args):
         return subprocess.call([sys.executable, 'PUT_fuzzer.py', '--test_path', str(WEB), *extra],
                                cwd=ROOT / 'llm-xss/PUT_fuzzer')
     if action == 'smoke':
-        return subprocess.call([sys.executable, str(Path(__file__).with_name('smoke.py'))], cwd=ROOT)
+        return subprocess.call([sys.executable, str(Path(__file__).resolve().with_name('smoke.py'))], cwd=ROOT)
     if action == 'versions':
         for command in (['php', '-v'], ['java', '-version'], ['python3', '--version'],
                         ['/opt/chrome/chrome', '--version'],
