@@ -13,7 +13,11 @@ Dockerfile、Compose、GitHub Actions 和运行入口已提供。
 客户端与服务端连接正常，`hello-world` 镜像拉取及容器运行通过。
 本地镜像 `xss-env:local` 已完成构建，容器内完整 smoke 通过：AST、TChecker、
 需要认证的 Neo4j、PUT 提取、Apache PHP 响应及真实 Chrome 脚本执行。
-镜像是否已发布，以 GitHub Actions 的发布结果为准。
+镜像已发布到 [GitHub Release](https://github.com/EMT52/XSS-Detector-Based-on-LLM/releases/tag/runtime-0836ca8a7476)
+及 GHCR；[构建、验证和发布流程](https://github.com/EMT52/XSS-Detector-Based-on-LLM/actions/runs/45365183084) 全部通过。
+Release 镜像包约 985 MB，已确认无需登录即可下载，校验文件与资产 SHA256 一致。
+本机还已逐条实跑手动实验的准备、提取和部署步骤，并验证进入 Bash、外部代码即时修改。
+LLM 命令及环境变量配置已补齐；未发起实际 LLM 请求，也未验证 sanitizer 插桩反馈。
 
 2026-11-24 本机验证：从现有源码完整重编译 TChecker 成功；7 项准备/发布边界
 检查和 20 项 fuzzer 回归检查通过；示例应用的步骤 1～6 实跑得到 1 条候选路径、
@@ -34,12 +38,13 @@ SHA256，Chrome ZIP 另通过完整 CRC 检查。
 ```bash
 git clone https://github.com/EMT52/XSS-Detector-Based-on-LLM.git
 cd XSS-Detector-Based-on-LLM
-sha256sum -c /镜像所在目录/xss-env-linux-amd64.tar.gz.sha256
-docker load -i /镜像所在目录/xss-env-linux-amd64.tar.gz
+image_dir=/镜像所在目录
+(cd "$image_dir" && sha256sum -c xss-env-linux-amd64.tar.gz.sha256)
+docker load -i "$image_dir/xss-env-linux-amd64.tar.gz"
 ./进入环境.sh
 ```
 
-校验命令应在镜像及校验文件所在目录执行，或者先切换到该目录校验。
+将 `image_dir` 替换为镜像和校验文件实际所在目录。
 这会启动后台环境并进入普通 Bash。以后的再次进入只需 `./进入环境.sh`。
 进入时不会自动跑实验；可以自由 `cd`，使用 Python、PHP、Java，执行自己的脚本：
 
@@ -237,7 +242,7 @@ python scripts/export_github.py --output .docker-state/github-source
 导出器不复制嵌套 Git 历史、应用、数据库、日志或结果。应将导出内容合并到
 目标仓库的新分支并检查 diff，再推送；不要直接覆盖远端历史。
 
-对当前空仓库，导出目录内可使用普通 Git 的 HTTPS 流程：
+对空仓库的首次发布，导出目录内可使用普通 Git 的 HTTPS 流程；已有仓库应克隆后合并提交：
 
 ```bash
 git init -b main
