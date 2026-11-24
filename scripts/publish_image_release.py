@@ -88,7 +88,7 @@ def main():
         '```bash\n'
         'sha256sum -c xss-env-linux-amd64.tar.gz.sha256\n'
         'docker load -i xss-env-linux-amd64.tar.gz\n'
-        './进入环境.sh\n'
+        './init.sh\n'
         '```\n'
         '公开 Release 的下载不需要访问令牌。进入 Bash 后可直接运行 Python、PHP、Java；'
         '源码和待测应用从宿主机挂载。Windows 使用 Docker Desktop + WSL2。\n\n'

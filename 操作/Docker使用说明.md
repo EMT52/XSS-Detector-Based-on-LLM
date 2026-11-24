@@ -41,11 +41,11 @@ cd XSS-Detector-Based-on-LLM
 image_dir=/镜像所在目录
 (cd "$image_dir" && sha256sum -c xss-env-linux-amd64.tar.gz.sha256)
 docker load -i "$image_dir/xss-env-linux-amd64.tar.gz"
-./进入环境.sh
+./init.sh
 ```
 
 将 `image_dir` 替换为镜像和校验文件实际所在目录。
-这会启动后台环境并进入普通 Bash。以后的再次进入只需 `./进入环境.sh`。
+这会启动后台环境并进入普通 Bash。以后的再次进入只需 `./init.sh`。
 进入时不会自动跑实验；可以自由 `cd`，使用 Python、PHP、Java，执行自己的脚本：
 
 ```bash
@@ -118,7 +118,7 @@ docker build --network=host \
 先将一个待测应用的源码放进 `php-app/`，进入 Bash 后也可以选用现有准备脚本：
 
 ```bash
-./进入环境.sh
+./init.sh
 # 以下在容器 Bash 内执行
 ./prepare_step7.sh --check-only
 ./prepare_step7.sh

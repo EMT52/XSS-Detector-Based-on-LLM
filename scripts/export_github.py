@@ -21,7 +21,7 @@ EXCLUDED_DIRS = {'.git', '.gradle', '__pycache__', 'bin', 'databases', 'storage'
 TOP_LEVEL = {'TChecker', 'phpjoern', 'llm-xss', 'neo4j-import-data', 'scripts',
              'docker', '.github', 'examples', '操作'}
 TOP_FILES = {'Dockerfile', 'compose.yaml', '.dockerignore', '.gitignore',
-             '.gitattributes', '.env.example', 'prepare_step7.sh', '进入环境.sh'}
+             '.gitattributes', '.env.example', 'prepare_step7.sh', 'init.sh'}
 KEY_PATTERNS = [re.compile(pattern.encode()) for pattern in (
     r'sk-[A-Za-z0-9_-]{16,}', r'gh[pousr]_[A-Za-z0-9_]{20,}',
     r'github_pat_[A-Za-z0-9_]{20,}', r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')]

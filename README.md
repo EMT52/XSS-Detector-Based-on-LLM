@@ -13,7 +13,7 @@ Windows 使用 Docker Desktop 的 WSL2 后端及 Linux containers。
 ```bash
 # 宿主机：从下方 Releases 下载镜像包，然后导入
 docker load -i xss-env-linux-amd64.tar.gz
-./进入环境.sh
+./init.sh
 
 # 已进入容器 Bash，以下都是普通命令，可逐条执行、修改和调试
 pwd
@@ -25,10 +25,10 @@ cd phpjoern
 
 已构建的镜像包及 SHA256 在 [Releases](https://github.com/EMT52/XSS-Detector-Based-on-LLM/releases/latest)。
 新机器下载并导入即可，无需自行编译或输入 GitHub 令牌。
-镜像也发布到 GHCR；具备相应下载权限时可使用 `./进入环境.sh --pull`。
+镜像也发布到 GHCR；具备相应下载权限时可使用 `./init.sh --pull`。
 
 容器终端支持任意命令，不会在进入时自动跑实验。步骤 1～7 的逐条命令见
-[容器内手动实验](操作/手动实验.md)。再次进入只需 `./进入环境.sh`；
+[容器内手动实验](操作/手动实验.md)。再次进入只需 `./init.sh`；
 `exit` 退出终端，源码与输出仍保存在宿主机。需要批量准备时也可手动执行
 `./prepare_step7.sh`，随后自行运行 `python PUT_fuzzer.py`。
 
