@@ -11,8 +11,9 @@ Windows 使用 Docker Desktop 的 WSL2 后端及 Linux containers。
 [Docker 使用说明](操作/Docker使用说明.md)。原本机流程见 [一键准备操作手册](操作/操作手册.md)。
 
 ```bash
-# 宿主机：使用已经发布的镜像，不在新机器编译
-./进入环境.sh --pull
+# 宿主机：从下方 Releases 下载镜像包，然后导入
+docker load -i xss-env-linux-amd64.tar.gz
+./进入环境.sh
 
 # 已进入容器 Bash，以下都是普通命令，可逐条执行、修改和调试
 pwd
@@ -21,6 +22,10 @@ php --version
 cd phpjoern
 ./php2ast /workspace/XSS/php-app
 ```
+
+已构建的镜像包及 SHA256 在 [Releases](https://github.com/EMT52/XSS-Detector-Based-on-LLM/releases/latest)。
+新机器下载并导入即可，无需自行编译或输入 GitHub 令牌。
+镜像也发布到 GHCR；具备相应下载权限时可使用 `./进入环境.sh --pull`。
 
 容器终端支持任意命令，不会在进入时自动跑实验。步骤 1～7 的逐条命令见
 [容器内手动实验](操作/手动实验.md)。再次进入只需 `./进入环境.sh`；

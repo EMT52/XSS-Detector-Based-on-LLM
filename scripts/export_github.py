@@ -50,6 +50,8 @@ def selected(path):
         return False
     if relative.parts[:2] == ('docker', 'vendor') and path.name != 'README.md':
         return False
+    if relative.parts[:2] == ('docker', '.wheel-cache') and path.name != 'README.md':
+        return False
     return True
 
 

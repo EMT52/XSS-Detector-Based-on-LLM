@@ -10,10 +10,10 @@ Neo4j 认证配置也不进入发布包。`任务书.md` 仅本地保留，不�
 
 Dockerfile、Compose、GitHub Actions 和运行入口已提供。
 本机已安装 Ubuntu 软件源提供的 Docker 29.1.3、Compose 2.40.3 和 Buildx 0.30.1，
-客户端与服务端连接正常，`hello-world` 镜像拉取及容器运行通过；实验容器正在首次构建。
-只有容器内
-构建及 smoke 全部通过后，才能认定相应镜像通过了下述检查。
-上传源代码本身不代表镜像已经构建、测试或发布成功。
+客户端与服务端连接正常，`hello-world` 镜像拉取及容器运行通过。
+本地镜像 `xss-env:local` 已完成构建，容器内完整 smoke 通过：AST、TChecker、
+需要认证的 Neo4j、PUT 提取、Apache PHP 响应及真实 Chrome 脚本执行。
+镜像是否已发布，以 GitHub Actions 的发布结果为准。
 
 2026-11-24 本机验证：从现有源码完整重编译 TChecker 成功；7 项准备/发布边界
 检查和 20 项 fuzzer 回归检查通过；示例应用的步骤 1～6 实跑得到 1 条候选路径、
@@ -26,15 +26,20 @@ SHA256，Chrome ZIP 另通过完整 CRC 检查。
 
 ## 推荐方式：进入 Bash，逐条运行命令
 
-镜像发布成功后，换机器只需安装 Docker、取得源码和拉取镜像，不需要重新编译依赖。
-宿主机执行：
+换机器只需安装 Docker、取得源码和导入已构建镜像，不需要重新编译依赖。
+从 [Releases](https://github.com/EMT52/XSS-Detector-Based-on-LLM/releases/latest) 下载
+`xss-env-linux-amd64.tar.gz` 和对应 `.sha256` 文件；公开下载无需访问令牌。
+源码可下载同页 Source code，或使用下面的克隆命令。宿主机执行：
 
 ```bash
 git clone https://github.com/EMT52/XSS-Detector-Based-on-LLM.git
 cd XSS-Detector-Based-on-LLM
-./进入环境.sh --pull
+sha256sum -c /镜像所在目录/xss-env-linux-amd64.tar.gz.sha256
+docker load -i /镜像所在目录/xss-env-linux-amd64.tar.gz
+./进入环境.sh
 ```
 
+校验命令应在镜像及校验文件所在目录执行，或者先切换到该目录校验。
 这会启动后台环境并进入普通 Bash。以后的再次进入只需 `./进入环境.sh`。
 进入时不会自动跑实验；可以自由 `cd`，使用 Python、PHP、Java，执行自己的脚本：
 
@@ -80,8 +85,9 @@ Compose 用于管理环境，日常实验在容器 Bash 内直接执行普通命
 
 当前 Ubuntu 24.04 主机的安装入口是 `bash scripts/install_docker_ubuntu.sh`，
 只安装 Docker、Compose、Buildx，不安装 GitHub CLI。
-仓库按用户习惯使用现有 Git 和 HTTPS；不要求创建 SSH 密钥。
-如果以后选择 SSH，也提供了可选入口 `bash scripts/connect_github_ssh.sh`。
+本机已使用普通 Git 和此前验证过的 SSH 密钥连接仓库，日常推送无需访问令牌。
+新机器可运行 `bash scripts/connect_github_ssh.sh` 配置自己的密钥；
+HTTPS 仍可用于公开仓库的免登录克隆，也可配合本机凭据管理器推送。
 本机凭据、私钥和口令不写入项目发布包。
 加入 docker 组后，旧登录会话可先执行 `newgrp docker` 刷新组权限。
 
@@ -94,8 +100,8 @@ docker build --network=host \
   --build-arg UBUNTU_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/ubuntu \
   --build-arg HTTP_PROXY="$HTTP_PROXY" --build-arg HTTPS_PROXY="$HTTPS_PROXY" \
   --build-arg http_proxy="$HTTP_PROXY" --build-arg https_proxy="$HTTPS_PROXY" \
-  --build-arg NO_PROXY=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn \
-  --build-arg no_proxy=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn \
+  --build-arg NO_PROXY=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn,pypi.org,files.pythonhosted.org \
+  --build-arg no_proxy=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn,pypi.org,files.pythonhosted.org \
   -t xss-env:local .
 ```
 
@@ -201,7 +207,7 @@ PHP 语法、Apache 响应和真实 Chrome 执行标记。它会替换共享 PUT
 因此在正式应用实验前运行，或在单独容器中执行：
 
 ```bash
-docker run --rm --shm-size=1g \
+docker run --rm --init --shm-size=1g \
   -e XSS_UID="$(id -u)" -e XSS_GID="$(id -g)" \
   --mount "type=bind,source=$PWD,target=/workspace/XSS" \
   ghcr.io/emt52/xss-detector-based-on-llm:latest smoke
@@ -224,7 +230,7 @@ docker run --rm --shm-size=1g \
 
 ```bash
 python scripts/export_github.py --scan-only
-python scripts/export_github.py --output dist/github-source
+python scripts/export_github.py --output .docker-state/github-source
 ```
 
 导出前会检查常见密钥模式，发现时只报告文件位置，不显示值。
@@ -247,8 +253,10 @@ HTTPS 不需要 SSH 密钥或 GitHub CLI。若要求输入 Password，应使用 
 不把令牌写入导出的源码目录。
 
 `.github/workflows/docker.yml` 在默认分支 push、`v*` 标签或手动触发时构建，
-先实际运行 smoke，只有通过后才发布 GHCR。PR 只构建验证。
-发布使用 GitHub 自带的 `GITHUB_TOKEN` 和 `packages: write`，无需存入个人 API Key。
+先实际运行 smoke，只有通过后才发布 GitHub Release 镜像包及 GHCR。PR 只构建验证。
+Release 使用 `runtime-源码提交前12位` 标签，包含已构建的 Docker 镜像及 SHA256。
+发布使用 GitHub 自带的 `GITHUB_TOKEN`、`contents: write` 和 `packages: write`，
+无需存入个人 API Key 或创建个人访问令牌。
 包的公开/私有状态由 GHCR 设置控制，本配置不会主动改为公开。
 
 发布成功后，新机器可以执行：

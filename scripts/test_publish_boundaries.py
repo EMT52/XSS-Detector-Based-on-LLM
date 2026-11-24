@@ -21,7 +21,8 @@ class PublishBoundaries(unittest.TestCase):
                              'llm-xss/.venv-py312-backup/bin/python',
                              'llm-xss/PUT_extractor/config/neo4j.json',
                              'llm-xss/PUT_extractor/databases/php-app/data/dbms/auth.ini',
-                             'docker/vendor/php-instrumented.tar.gz'):
+                             'docker/vendor/php-instrumented.tar.gz',
+                             'docker/.wheel-cache/private.whl'):
                     with self.subTest(name=name):
                         self.assertFalse(publisher.selected(root / name))
                 for name in ('TChecker/projects/extensions/StaticAnalysis.java',

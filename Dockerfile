@@ -47,7 +47,11 @@ COPY --from=build /usr/lib/apache2/modules/libphp7.so /usr/lib/apache2/modules/l
 COPY --from=build /usr/local/bin/chromedriver/ /usr/local/bin/chromedriver/
 COPY --from=build /build/php-flavor /usr/local/share/xss/php-flavor
 COPY docker/requirements.lock /usr/local/share/xss/requirements.lock
-RUN python3 -m pip install --no-cache-dir pip==23.0.1 setuptools==65.5.0 wheel==0.45.1 \
+ARG XSS_OFFLINE_WHEELS=0
+RUN --mount=type=bind,source=docker/.wheel-cache,target=/tmp/xss-wheels \
+    if [ "$XSS_OFFLINE_WHEELS" = 1 ]; then export PIP_NO_INDEX=1; fi \
+    && export PIP_FIND_LINKS=/tmp/xss-wheels \
+    && python3 -m pip install --no-cache-dir pip==23.0.1 setuptools==65.5.0 wheel==0.45.1 \
     && python3 -m pip install --no-cache-dir -r /usr/local/share/xss/requirements.lock \
     && python3 -m pip check
 COPY docker/apache.conf /etc/apache2/sites-available/000-default.conf

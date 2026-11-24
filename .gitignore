@@ -30,3 +30,5 @@ runs/
 llm-xss/php-instr.tar.gz
 docker/vendor/*
 !docker/vendor/README.md
+docker/.wheel-cache/*
+!docker/.wheel-cache/README.md
