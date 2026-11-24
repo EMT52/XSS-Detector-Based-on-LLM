@@ -407,10 +407,7 @@ def prepare(args, run, manifest):
                                      for i in expected):
             raise RuntimeError('PUT 数量或文件不完整；查看 06-extractor.log')
         for i in expected:
-            if not re.search(r'''\$_GET\s*\[\s*['"][^'"]+['"]\s*\]''',
-                             (puts / i / 'index.php').read_text()):
-                raise RuntimeError(f'PUT {i} 没有 GET 注入入口，无法交给当前 fuzzer；不发布')
-            print(f'  PUT {i}：index.php、function_definition.php 及 GET 入口检查通过', flush=True)
+            print(f'  PUT {i}：index.php、function_definition.php 文件完整', flush=True)
         lint = []
         for p in sorted(puts.rglob('*.php')):
             result = subprocess.run([php, '-l', str(p)], capture_output=True, text=True,

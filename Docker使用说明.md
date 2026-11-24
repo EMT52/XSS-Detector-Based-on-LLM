@@ -61,11 +61,15 @@ SHA256，Chrome ZIP 另通过完整 CRC 检查。
 
 ```bash
 docker build --network=host \
+  --build-arg UBUNTU_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/ubuntu \
   --build-arg HTTP_PROXY="$HTTP_PROXY" --build-arg HTTPS_PROXY="$HTTPS_PROXY" \
   --build-arg http_proxy="$HTTP_PROXY" --build-arg https_proxy="$HTTPS_PROXY" \
+  --build-arg NO_PROXY=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn \
+  --build-arg no_proxy=localhost,127.0.0.1,mirrors.tuna.tsinghua.edu.cn \
   -t xss-env:local .
 ```
 
+`UBUNTU_MIRROR` 只替换 Ubuntu 软件源地址，仍验证 Ubuntu 的签名；不指定时使用原始源。
 这属于当前 Linux 主机的联网设置；普通可直连主机仍可使用下面的 Compose 构建命令。
 
 在项目根目录执行，先将一个待测应用的源码放进 `php-app/`：

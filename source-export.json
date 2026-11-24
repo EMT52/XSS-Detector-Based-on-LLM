@@ -1,13 +1,13 @@
 {
-  "exported_at": "2026-11-24T16:17:39.033918+08:00",
+  "exported_at": "2026-11-24T16:33:22.690510+08:00",
   "sha256": {
     ".dockerignore": "53ec8fcb6ad1bfd404b00b4d088652247d2d6c34bd7172b5761d2c83a86e3e71",
     ".env.example": "a9f2bb2f5da5990f3f0dc2fa075678eda9588c322a04e87aa28518e21ea10a6b",
     ".gitattributes": "b879415cc8286c07ef004aad6c32db88bf34173c6976d2a0f92e9c61b0abad92",
     ".github/workflows/docker.yml": "7181a7bd5b32b6e82b0b8edc8d7f17b24a6e92a9a35eb93d9c4239885f590520",
     ".gitignore": "f214ae6c1fa279da89ddc9a3cbc5bb85073f9e33939517272b3afac1aecc00fa",
-    "Dockerfile": "7af781b342c42d0808e56a0a55928e21d5aa3712dc3dc2d62de5af66c6c5f1de",
-    "Docker使用说明.md": "b0dd1245f4847c07cda04f660e323db0c52b9c29692ef0bc30ce4a4e1d2d5f8b",
+    "Dockerfile": "2d9d81bd69747505b36fa8a9e3036da884bdf2a8bc17a6bb4b886475363c8b08",
+    "Docker使用说明.md": "fbea3df223c7defd2239c8683c1db42c817f09e50164e71d18c3308722a961e7",
     "README.md": "dc464eaf6506baee208c68bc9668fe7112fcbf1e01f5e7d94247c5134dcde8e3",
     "TChecker/ApacheCommons/commons-cli-1.4/CONTRIBUTING.md": "d1e41167da2953fa706492cfd84a51e8810c8288ae98bfba8e988579eb58ef74",
     "TChecker/ApacheCommons/commons-cli-1.4/LICENSE.txt": "47b2b7375318c574ef44d0def1e28d296e8bac5940d24d2694f5d99e7053b780",
@@ -1829,11 +1829,12 @@
     "scripts/connect_github_ssh.sh": "a820cf6db24a3c3d6eb351c15a9837c41ca0173e9945e96d0b174b8e8a9416b3",
     "scripts/export_github.py": "325e7aceefe83e8af2e56082ad4d11cf50ae6b0f0ff35964b2ad8eb9c23e7edd",
     "scripts/install_docker_ubuntu.sh": "5e11ffa5e9931f4c52656d61f786e9592574e8c487eaa4e8bb1ca6650d4ab287",
-    "scripts/prepare_step7.py": "06c04ed4ba2397e12231964444cde56252014f01ae561e6676060b2a87ad2521",
+    "scripts/prepare_step7.py": "1cdf785906d7ec0aa3c8414ab3be8b1cbcd76ce340f494d82643b19db97036cd",
+    "scripts/push_github_https.sh": "9ef7ed2d21badefa83383de427294d3ec712f2c207629a3b5dfd387566b12b6e",
     "scripts/test_prepare_step7.py": "3f05522844ce9537ba316a05bc05d8ff918be66795a245782b4daae697c20431",
     "scripts/test_publish_boundaries.py": "b24d2e184acf8c8db5e9549924a96560a0999b869c1d459a691bbe18c0af5521",
     "scripts/verify_standard_gap.py": "f603e5f69f5f381d634ac493e0a7ecd7ef7ea6fc1abd84454d995eeae0b5b3bf",
-    "scripts/操作手册.md": "4d1e4dc607e125dc6f004f629c7eab2757f1dde2d54af9e6c2c5afd558867302",
-    "操作指南.md": "e9a0dd3fbaafdff1d2208c6345d2d30ec81b17bfd1351ee59572ebbe9eacfd1c"
+    "scripts/操作手册.md": "bccedfe5f5ce35d14cd65439e9121616dce26697099ecf1d017f17d17933f1e8",
+    "操作指南.md": "c69cad843052a4ddd0d62f67a6950c5ceec107f426397b7b66b9fc8e774ea8fa"
   }
 }
