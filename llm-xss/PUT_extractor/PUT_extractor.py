@@ -20,6 +20,7 @@ from core.neo4j_connector_center import Neo4jConnectorCenter
 from core.neo4j_engine import Neo4jEngine
 from core.neo4j_engine.const import *
 from core.function_extractor import FunctionExtractor
+from core.php_source import PhpSource
 from core.sink_context_analyzer import sink_context_analysis
 from core.undefined_symbol_handler import UndefinedSymbolHandler
 
@@ -237,7 +238,9 @@ def run(target):
         # 3. 添加路径代码（只提取全局作用域节点，排除函数内部节点）
         _t0 = _time.time()
         logger.info(f"  [DEBUG] Step: extract_code for path...")
-        code_list = Ast2CodeFactory.extract_code(analyzer_target, global_scope_nodes) if global_scope_nodes else []
+        code_list = Ast2CodeFactory.extract_code(
+            analyzer_target, global_scope_nodes, member_call_symbol=function_extractor.member_call_symbol
+        )
         logger.info(f"  [DEBUG] extract_code(path) done in {_time.time()-_t0:.1f}s")
         if isinstance(code_list, list):
             for code in code_list:
@@ -249,7 +252,9 @@ def run(target):
         # 4. 添加 sink 代码（完整提取，包括子节点）
         _t0 = _time.time()
         logger.info(f"  [DEBUG] Step: extract_code for sink...")
-        sink_code = Ast2CodeFactory.extract_code(analyzer_target, potential_sink)
+        sink_code = Ast2CodeFactory.extract_code(
+            analyzer_target, potential_sink, member_call_symbol=function_extractor.member_call_symbol
+        )
         logger.info(f"  [DEBUG] extract_code(sink) done in {_time.time()-_t0:.1f}s")
         if sink_code and sink_code.strip():
             path_code += sink_code + ";\n"
@@ -262,7 +267,7 @@ def run(target):
         if not sink_is_output and sink_type == TYPE_CALL:
             try:
                 call_name = analyzer_target.code_step.get_ast_call_code(potential_sink)
-                if call_name in {'printf', 'header', 'wp_die', 'die', 'exit', 'vprintf'}:
+                if call_name and php_symbol_key(call_name) in {'printf', 'header', 'wp_die', 'die', 'exit', 'vprintf'}:
                     sink_is_output = True
             except Exception:
                 pass
@@ -302,12 +307,8 @@ def run(target):
         # 5. 跳过 UndefinedSymbolHandler（已通过 funcid 过滤 + stub 机制替代）
         # 它的 temp 赋值全部会被清理掉，且内部 Cypher 查询耗时，无实际意义
         
-        # 5.5 对象方法链的正则简化（原 UndefinedSymbolHandler.run() 中的纯正则部分）
-        path_code = re.sub(r'(\$?[\w\[\'"\]\(\)]+->)+(\w+\s*\()', r'\2', path_code)
-        path_code = re.sub(r'(\$?[\w\[\'"\]\(\)]+->)+([\w\[\'"\]]+)', r'$\2', path_code)
-        path_code = re.sub(r'([\$?\w\[\'"\]\(\)]+::)+(\w+\s*\()', r'\2', path_code)
-        path_code = re.sub(r'(\\\w+)+\\', '', path_code)
-        path_code = re.sub(r'\$this([^\w])', r'$this\1', path_code)
+        source = PhpSource(path_code)
+        path_code = source.render(source.normalization_edits())
         
         # 6. 在最前面插入 include（确保 include 之前没有其他代码）
         path_code = "include 'function_definition.php';\n\n" + path_code
@@ -331,29 +332,19 @@ def run(target):
             f.flush()
 
 def extract_call_sites(target, analyzer_target: Neo4jEngine, potential_sink: py2neo.Node, taint_flow):
-    call_site_series = []
+    call_site_series = set()
     for node_id in taint_flow['taint_flow']:
         node = analyzer_target.get_node_itself(node_id)
 
         if node[NODE_TYPE] in {TYPE_FOREACH}:
             node = analyzer_target.ast_step.get_ith_child_node(node, 0)
 
-        for call_node in analyzer_target.filter_ast_child_nodes(node, 
-                                node_type_filter={TYPE_CALL, TYPE_METHOD_CALL, TYPE_STATIC_CALL}):
-            if call_node[NODE_INDEX] not in call_site_series:
-                call_site_series.append(call_node[NODE_INDEX])
-            else:
-                continue
-            
-            decl_nodes = analyzer_target.cg_step.find_decl_nodes(call_node)
-            decl_nodes.extend(analyzer_target.cg_step.match_decl_nodes(call_node))
-            if not decl_nodes:
-                # 找不到函数声明，继续处理其他节点，而不是返回 None
-                logger.warning(f"No declaration found for call node {call_node[NODE_INDEX]}")
-                continue
-
-    call_site_series = sorted(call_site_series)
-    return call_site_series
+        call_site_series.update(
+            call[NODE_INDEX] for call in analyzer_target.filter_ast_child_nodes(
+                node, node_type_filter=set(CALL_DECLARATION_TYPES)
+            )
+        )
+    return sorted(call_site_series)
 
 if __name__ == "__main__":
     main()

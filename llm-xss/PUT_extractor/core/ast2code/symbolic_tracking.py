@@ -71,9 +71,10 @@ logger = logging.getLogger(__name__)
 
 
 class SymbolicTracking(object):
-    def __init__(self, analyzer: Neo4jEngine, with_memory=False):
+    def __init__(self, analyzer: Neo4jEngine, with_memory=False, *, member_call_symbol=None):
         self.tac_path = ThreeAddressCodePath(with_memory)
         self.analyzer = analyzer
+        self.member_call_symbol = member_call_symbol
         self.__global_normalize_level = 0b00000000
 
     def to_src_code(self):
@@ -821,11 +822,12 @@ class SymbolicTracking(object):
             res_arg = self.manage_generic_node(arg)
             resolved_args.append(res_arg[0])
             resolved_args_types.append(res_arg[1])
+        symbol = self.member_call_symbol(node) if self.member_call_symbol else None
         return self.gen_formula(
             left=join_var_node(node.identity),
             right=resolved_args,
-            op=self.analyzer.code_step.get_ast_static_call_code(node),
-            node_type=TYPE_STATIC_CALL,
+            op=symbol or self.analyzer.code_step.get_ast_static_call_code(node),
+            node_type=TYPE_CALL if symbol else TYPE_STATIC_CALL,
             node_id=node.identity,
             ltype="string",
             rtype=resolved_args_types
@@ -840,6 +842,11 @@ class SymbolicTracking(object):
             res_arg = self.manage_generic_node(arg)
             resolved_args.append(res_arg[0])
             resolved_args_types.append(res_arg[1])
+        if self.member_call_symbol:
+            return self.gen_formula(
+                join_var_node(node.identity), resolved_args, self.member_call_symbol(node),
+                TYPE_CALL, node.identity, "string", resolved_args_types
+            )
         var_node = self.analyzer.get_ast_child_node(node, ignore_error_flag=True)
         if var_node is None:
             # 没有子节点，使用节点本身

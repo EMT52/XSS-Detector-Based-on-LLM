@@ -2,6 +2,7 @@ import logging
 from abc import ABC
 from typing import List, Set, Tuple, Union
 from collections import deque
+from functools import cached_property
 
 import Levenshtein
 import networkx as nx
@@ -45,7 +46,7 @@ class ASTStep(AbstractStep):
                     res_.append(i)
             else:
                 res_.append(i)
-        return list(sorted(res_, key=lambda x: x[NODE_INDEX]))
+        return sorted(res_, key=lambda node: int(node[NODE_INDEX]))
 
     def get_ith_parent_node(self, _node: py2neo.Node, i: int = 0, ignore_error_flag=False) -> py2neo.Node | None:
         _node_cp = self.parent.find_ast_parent_nodes(_node)
@@ -277,10 +278,10 @@ class BasicStep(AbstractStep):
         super().__init__(parent, "basic_step")
         self.neo4j_graph = parent.neo4j_graph
 
-    def run(self, query) -> py2neo.NodeMatch:
+    def run(self, query, parameters=None) -> py2neo.NodeMatch:
         tx = self.neo4j_graph.begin()
         try:
-            res = tx.run(query)
+            res = tx.run(query, parameters=parameters)
             tx.commit()
             return res
         except Exception as e:
@@ -392,31 +393,101 @@ class CGStep(AbstractStep):
         res = [i.start_node for i in
                self.parent.neo4j_graph.relationships.match(nodes=[None, _node], r_type=CALLS_EDGE, )]
         return list(sorted(res, key=lambda x: x[NODE_INDEX]))
+
+    @cached_property
+    def global_function_names(self):
+        return {
+            php_symbol_key(_normalize(name)) for name, in self.parent.basic_step.run(
+                "MATCH (N:AST {type: 'AST_FUNC_DECL'}) "
+                "OPTIONAL MATCH (N)-[:PARENT_OF]->(M:AST {type: 'string'}) "
+                "WHERE toString(M.childnum) = '0' "
+                "RETURN DISTINCT coalesce(N.name, M.code)"
+            ) if name
+        }
     
-    def match_decl_nodes(self, _node: py2neo.Node) -> List[py2neo.Node]:
-        if _node[NODE_TYPE] == TYPE_CALL:
-            function_name = self.parent.code_step.get_ast_call_code(_node)
-            decl_node_type = [TYPE_FUNC_DECL]
+    def get_call_name_node(self, call_node):
+        child = self.parent.ast_step.get_ith_child_node
+        if call_node[NODE_TYPE] == TYPE_CALL:
+            expr = child(call_node, 0, ignore_error_flag=True)
+            if expr is None or expr[NODE_TYPE] != TYPE_NAME:
+                return None
+            name = child(expr, 0, ignore_error_flag=True)
         else:
-            function_name = self.parent.ast_step.get_ith_child_node(_node, 1)[NODE_CODE]
-            decl_node_type = [TYPE_METHOD]
-        arg_node_count = self.parent.ast_step.get_function_arg_node_cnt(_node)
-        # 方式1: 通过子节点的 code 属性匹配函数名
-        matched_decl_nodes = [n for n, in self.parent.basic_step.run(
-            f"MATCH (N:AST) - [:PARENT_OF] -> (M) WHERE N.type in {decl_node_type.__str__()} "
-            f"AND M.childnum=0 AND M.code='{function_name}' RETURN N"
-        )]
-        # 方式2: 如果方式1没找到，通过节点自身的 name 属性匹配
-        # （phpjoern 某些版本将函数名存储在 AST_FUNC_DECL 节点的 name 属性中，而非子节点的 code）
-        if not matched_decl_nodes:
-            matched_decl_nodes = [n for n, in self.parent.basic_step.run(
-                f"MATCH (N:AST) WHERE N.type in {decl_node_type.__str__()} "
-                f"AND N.name='{function_name}' RETURN N"
-            )]
-        matched_decl_nodes = [n for n in matched_decl_nodes 
-                            if self.parent.ast_step.find_function_param_node_list(n).
-                            __len__() == arg_node_count]
-        return matched_decl_nodes
+            name = child(call_node, 1, ignore_error_flag=True)
+        return name if name is not None and name[NODE_TYPE] == TYPE_STRING else None
+
+    def match_decl_nodes(self, call_node: py2neo.Node) -> List[py2neo.Node]:
+        decl_type = CALL_DECLARATION_TYPES.get(call_node[NODE_TYPE])
+        if decl_type is None:
+            return []
+        name_node = self.get_call_name_node(call_node)
+        if name_node is None or not name_node[NODE_CODE]:
+            return []
+
+        name = php_symbol_key(_normalize(name_node[NODE_CODE]).lstrip('\\'))
+        if '\\' in name:
+            return []
+        namespace = self.get_call_namespace(call_node)
+        params = {'type': decl_type, 'name': name, 'namespace': namespace}
+        query = (
+            "MATCH (N:AST) WHERE N.type = $type "
+            "OPTIONAL MATCH (N)-[:PARENT_OF]->(M:AST {type: 'string'}) "
+            "WHERE toString(M.childnum) = '0' "
+            "WITH N, coalesce(N.name, M.code) AS name "
+            "WHERE toLower(name) = toLower($name) "
+            "AND toLower(coalesce(N.namespace, '')) = toLower($namespace) "
+        )
+        if decl_type == TYPE_METHOD:
+            owner = self._member_call_owner(call_node)
+            if owner is None:
+                return []
+            params['owner'], params['namespace'] = owner
+            query += "AND toLower(N.classname) = toLower($owner) "
+        arg_count = self.parent.ast_step.get_function_arg_node_cnt(call_node)
+        return [
+            node for node, declared_name in self.parent.basic_step.run(query + "RETURN N, name", params)
+            if node[NODE_TYPE] == decl_type and php_symbol_key(_normalize(declared_name)) == name
+            and php_symbol_key(_normalize(node.get('namespace') or '')) == params['namespace']
+            and (decl_type != TYPE_METHOD or php_symbol_key(node.get('classname') or '') == params['owner'])
+            and len(self.parent.ast_step.find_function_param_node_list(node)) == arg_count
+        ]
+
+    def get_call_namespace(self, call_node):
+        if call_node[NODE_TYPE] == TYPE_CALL:
+            expr = self.parent.ast_step.get_ith_child_node(call_node, 0, ignore_error_flag=True)
+            if expr is not None and 'NAME_FQ' in (expr.get(NODE_FLAGS) or ()):
+                return ''
+        return php_symbol_key(_normalize(call_node.get('namespace') or ''))
+
+    def _member_call_owner(self, call_node):
+        child = self.parent.ast_step.get_ith_child_node
+        receiver = child(call_node, 0, ignore_error_flag=True)
+        if receiver is None:
+            return None
+        namespace = php_symbol_key(_normalize(call_node.get('namespace') or ''))
+        if call_node[NODE_TYPE] == TYPE_METHOD_CALL:
+            if receiver[NODE_TYPE] == TYPE_VAR:
+                var = child(receiver, 0, ignore_error_flag=True)
+                if var is not None and _normalize(var[NODE_CODE]) == 'this':
+                    owner = call_node.get('classname')
+                    return (php_symbol_key(owner), namespace) if owner else None
+            if receiver[NODE_TYPE] != TYPE_NEW:
+                return None
+            receiver = child(receiver, 0, ignore_error_flag=True)
+        if receiver is None or receiver[NODE_TYPE] != TYPE_NAME:
+            return None
+        name = child(receiver, 0, ignore_error_flag=True)
+        if name is None or not name[NODE_CODE]:
+            return None
+        owner = php_symbol_key(_normalize(name[NODE_CODE]).lstrip('\\'))
+        if owner == 'self':
+            classname = call_node.get('classname')
+            return (php_symbol_key(classname), namespace) if classname else None
+        if owner in {'parent', 'static'} or '\\' in owner:
+            return None
+        if 'NAME_FQ' in (receiver.get(NODE_FLAGS) or ()):
+            namespace = ''
+        return owner, namespace
 
 
 class CHGStep(AbstractStep):

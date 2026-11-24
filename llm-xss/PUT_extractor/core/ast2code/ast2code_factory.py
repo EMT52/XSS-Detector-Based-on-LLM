@@ -8,10 +8,11 @@ from .symbolic_tracking import SymbolicTracking
 
 class Ast2CodeFactory(object):
     @staticmethod
-    def extract_code(analyzer: Neo4jEngine, feeder: Union[List, int, py2neo.Node], with_memory=False, normalize_level=0):
+    def extract_code(analyzer: Neo4jEngine, feeder: Union[List, int, py2neo.Node], with_memory=False,
+                     normalize_level=0, *, member_call_symbol=None):
         if isinstance(feeder, List) and feeder.__len__() == 0:
             return []
-        st = SymbolicTracking(analyzer, with_memory)
+        st = SymbolicTracking(analyzer, with_memory, member_call_symbol=member_call_symbol)
         if isinstance(feeder, List) and isinstance(feeder[0], int):
             res = []
             for node_id in feeder:

@@ -1,4 +1,4 @@
-import os, json
+import os
 import logging
 import py2neo
 import re
@@ -12,6 +12,9 @@ from core.neo4j_engine import Neo4jEngine
 from core.model import PHP_BUILT_IN_FUNCTIONS
 from core.neo4j_engine.const import *
 from core.helper import generate_temporary_var
+from core.php_source import IDENTIFIER, METHOD_MODIFIERS, PhpSource
+
+PHP_BUILTIN_NAMES = frozenset(map(php_symbol_key, PHP_BUILT_IN_FUNCTIONS))
 
 class FunctionExtractor(object):
     def __init__(self, target: str, analyzer: Neo4jEngine, path_id: int, call_site_series: List[int]):
@@ -20,10 +23,17 @@ class FunctionExtractor(object):
         self.call_site_series = call_site_series
         self.path_id = path_id
         self.__compile_storage_path()
+        self._declarations = {}
+        self._call_names = {}
+        self._body_calls = {}
+        self._member_names = {}
+        self._global_names = set(PHP_BUILTIN_NAMES)
+        self._required_names = {}
+        self._defined_names = set()
 
     def __compile_storage_path(self):
         def_storage_basedir = os.path.join(STORAGE_PATH, 'PUT')
-        self.def_storage_path = os.path.join(def_storage_basedir, self.target, self.path_id)
+        self.def_storage_path = os.path.join(def_storage_basedir, self.target, str(self.path_id))
         os.makedirs(self.def_storage_path, exist_ok=True)
 
     def cat_lines_from_file(self, file_path, line_numbers: Union[List, Tuple]) -> List[str]:
@@ -37,7 +47,7 @@ class FunctionExtractor(object):
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
                 for lineno, line in enumerate(file, start=1):
                     if lineno in lineno_set:
-                        selected_lines.append(line.rstrip())
+                        selected_lines.append(line.rstrip('\r\n'))
             return selected_lines
         except (UnicodeDecodeError, FileNotFoundError, OSError):
             return []
@@ -144,67 +154,6 @@ class FunctionExtractor(object):
         dep_code = re.sub(re_pattern, replace_callback, dep_code)
         return dep_code
     
-    def match_decl_nodes(self, call_node: py2neo.Node):
-        if call_node[NODE_TYPE] == TYPE_CALL:
-            function_name = self.analyzer.code_step.get_ast_call_code(call_node)
-            decl_node_type = [TYPE_FUNC_DECL]
-        else:
-            function_name = self.analyzer.ast_step.get_ith_child_node(call_node, 1)[NODE_CODE]
-            decl_node_type = [TYPE_METHOD]
-        arg_node_count = self.analyzer.ast_step.get_function_arg_node_cnt(call_node)
-        matched_decl_nodes = [n for n, in self.analyzer.basic_step.run(
-            f"MATCH (N:AST) - [:PARENT_OF] -> (M) WHERE N.type in {decl_node_type.__str__()} "
-            f"AND M.childnum=0 AND M.code='{function_name}' RETURN N"
-        )]
-        matched_decl_nodes = [n for n in matched_decl_nodes 
-                            if self.analyzer.ast_step.find_function_param_node_list(n).
-                            __len__() == arg_node_count]
-        return matched_decl_nodes
-
-    def collect_dep_nodes(self, initial_node):
-        all_dep_nodes = []
-        current_dep_nodes = [initial_node]
-        depth = 0
-        max_depth = 1  # 只提取函数本身，内部依赖由 stub 覆盖
-        # 缓存：同一个 call node 的声明查找结果只查一次
-        if not hasattr(self, '_decl_cache'):
-            self._decl_cache = {}
-        while current_dep_nodes.__len__() > 0 and depth < max_depth:
-            depth += 1
-            next_dep_nodes = []
-            logger.info(f"    [collect_dep_nodes] depth={depth}, processing {len(current_dep_nodes)} nodes, total collected={len(all_dep_nodes)}")
-            for dep_node in current_dep_nodes:
-                dep_file = self.analyzer.fig_step.get_belong_file(dep_node)
-                if "PHPJOERN_PREDEFINE.php" in dep_file:
-                    continue
-
-                all_dep_nodes.append(dep_node)
-                call_nodes = self.analyzer.filter_ast_child_nodes(dep_node, 
-                            node_type_filter={TYPE_CALL, TYPE_METHOD_CALL, TYPE_STATIC_CALL})
-                
-                for call_node in call_nodes:
-                    call_id = call_node[NODE_INDEX]
-                    # 用缓存避免重复查询
-                    if call_id in self._decl_cache:
-                        decl_nodes = self._decl_cache[call_id]
-                    else:
-                        code = self.analyzer.code_step.get_node_code(call_node)
-                        if code in PHP_BUILT_IN_FUNCTIONS and call_node[NODE_TYPE] == TYPE_CALL:
-                            self._decl_cache[call_id] = []
-                            continue
-                        decl_nodes = self.analyzer.cg_step.find_decl_nodes(call_node)
-                        if not decl_nodes:
-                            decl_nodes = self.analyzer.cg_step.match_decl_nodes(call_node)
-                        self._decl_cache[call_id] = decl_nodes
-                    if decl_nodes:
-                        next_dep_nodes.extend(decl_nodes)
-            current_dep_nodes = next_dep_nodes
-            current_dep_nodes = [n for n in current_dep_nodes if n not in all_dep_nodes]
-            current_dep_nodes = list(OrderedDict((node[NODE_INDEX], node) for node in current_dep_nodes).values())
-            logger.info(f"    [collect_dep_nodes] depth={depth} done, next level has {len(current_dep_nodes)} new nodes")
-        logger.info(f"    [collect_dep_nodes] finished, total dep nodes: {len(all_dep_nodes)}")
-        return all_dep_nodes
-
     def handle_global_defs(self, dep_node, dep_code):
         global_def_nodes = []
         global_nodes = self.analyzer.filter_ast_child_nodes(dep_node, node_type_filter=[TYPE_GLOBAL])
@@ -236,139 +185,163 @@ class FunctionExtractor(object):
             dep_code = global_def_code + dep_code
         return dep_code
 
-    def resolve_function_definition(self, decl_node: py2neo.Node):
-        all_dep_nodes = []
-        all_dep_nodes = self.collect_dep_nodes(decl_node)
-        all_dep_nodes = list(OrderedDict((node[NODE_INDEX], node) for node in all_dep_nodes).values())
+    def _call_name_node(self, call_node):
+        call_id = call_node[NODE_INDEX]
+        if call_id not in self._call_names:
+            self._call_names[call_id] = self.analyzer.cg_step.get_call_name_node(call_node)
+        return self._call_names[call_id]
 
-        import time as _t
-        logger.info(f"    [resolve_func_def] processing {len(all_dep_nodes)} dep nodes...")
-        all_dep_code = ""
-        for i, dep_node in enumerate(all_dep_nodes[::-1]):
-            _t0 = _t.time()
-            # 跳过已经在其他调用链中处理过的函数
-            if dep_node[NODE_INDEX] in self._processed_decl_ids and dep_node[NODE_INDEX] != decl_node[NODE_INDEX]:
+    def _global_call_name(self, call_node):
+        name = self._call_name_node(call_node)
+        if name is not None and name[NODE_CODE]:
+            name = name[NODE_CODE].strip('"').strip("'").lstrip('\\')
+            if IDENTIFIER.fullmatch(name):
+                return name
+        return None
+
+    def _resolve_declaration(self, call_node):
+        call_id = call_node[NODE_INDEX]
+        if call_id not in self._declarations:
+            expected_type = CALL_DECLARATION_TYPES[call_node[NODE_TYPE]]
+            candidates = {}
+            if expected_type == TYPE_FUNC_DECL:
+                name = self._global_call_name(call_node)
+                builtin = name and php_symbol_key(name) in PHP_BUILTIN_NAMES
+                if builtin and not self.analyzer.cg_step.get_call_namespace(call_node):
+                    self._declarations[call_id] = None
+                    return None
+
+            for lookup in (self.analyzer.cg_step.find_decl_nodes, self.analyzer.cg_step.match_decl_nodes):
+                candidates = {node[NODE_INDEX]: node for node in lookup(call_node)
+                              if node[NODE_TYPE] == expected_type}
+                if candidates:
+                    break
+            self._declarations[call_id] = next(iter(candidates.values())) if len(candidates) == 1 else None
+        return self._declarations[call_id]
+
+    def _member_symbol(self, kind, node_id):
+        key = (kind, node_id)
+        if key not in self._member_names:
+            global_declarations = self.analyzer.cg_step.global_function_names
+            symbol = f"__put_{kind}_{node_id}"
+            while symbol in self._global_names or symbol in global_declarations:
+                symbol += '_'
+            self._member_names[key] = symbol
+        return self._member_names[key]
+
+    def member_call_symbol(self, call_node):
+        declaration = self._resolve_declaration(call_node)
+        if declaration is None:
+            name = self._member_symbol('member_stub', call_node[NODE_INDEX])
+        else:
+            name = self._member_symbol('method', declaration[NODE_INDEX])
+        self._required_names[name] = name
+        return name
+
+    def _register_global_calls(self, calls):
+        for call in calls:
+            if call[NODE_TYPE] == TYPE_CALL:
+                name = self._global_call_name(call)
+                if name:
+                    key = php_symbol_key(name)
+                    self._global_names.add(key)
+                    if key not in PHP_BUILTIN_NAMES:
+                        self._required_names.setdefault(key, name)
+
+    def _get_body_calls(self, declaration):
+        decl_id = declaration[NODE_INDEX]
+        if decl_id not in self._body_calls:
+            self._body_calls[decl_id] = self.analyzer.filter_ast_child_nodes(
+                declaration, node_type_filter=set(CALL_DECLARATION_TYPES)
+            )
+        return self._body_calls[decl_id]
+
+    def resolve_function_definition(self, decl_node: py2neo.Node):
+        source_path = self.analyzer.fig_step.get_belong_file(decl_node)
+        if not source_path or "PHPJOERN_PREDEFINE.php" in source_path:
+            return ''
+        name = decl_node.get(NODE_NAME)
+        if not name:
+            name_node = self.analyzer.ast_step.get_ith_child_node(decl_node, 0, ignore_error_flag=True)
+            name = name_node and name_node.get(NODE_CODE)
+            if not name:
+                return ''
+            name = name.strip('"').strip("'")
+        line_range = (int(decl_node[NODE_LINENO]), int(decl_node[NODE_ENDLINENO]))
+        code = '\n'.join(self.cat_lines_from_file(source_path, line_range))
+        if not code:
+            return ''
+
+        source = PhpSource(code, line_range[0])
+        declarations = list(source.declarations(name, *line_range))
+        if len(declarations) > 1:
+            # Line-only AST positions can include multiple same-named functions.
+            # Read the surrounding class scopes to select the actual declaration.
+            with open(source_path, encoding='utf-8', errors='ignore') as file:
+                source = PhpSource(file.read(), fragment=False)
+            owner = decl_node.get('classname') if decl_node[NODE_TYPE] == TYPE_METHOD else None
+            owner = php_symbol_key(owner) if owner else None
+            declarations = [item for item in source.declarations(name, *line_range)
+                            if source.declaration_owner(item[0]) == owner]
+        if len(declarations) != 1:
+            logger.warning("Could not locate declaration %s at %s:%s", name, source_path, line_range[0])
+            return ''
+        function_index, name_index, body_end = declarations[0]
+        tokens = source.tokens
+        first = function_index
+        edits = []
+        calls = self._get_body_calls(decl_node)
+        self._register_global_calls(calls)
+        if decl_node[NODE_TYPE] == TYPE_METHOD:
+            while first and tokens[first - 1].kind in METHOD_MODIFIERS:
+                first -= 1
+                edits.append((tokens[first].start, tokens[first].end, ''))
+            name = self._member_symbol('method', decl_node[NODE_INDEX])
+            edits.append((tokens[name_index].start, tokens[name_index].end, name))
+
+        bindings = []
+        for call in calls:
+            if call[NODE_TYPE] == TYPE_CALL:
                 continue
-            self._processed_decl_ids.add(dep_node[NODE_INDEX])
-            # 获取函数名：优先用 name 属性（phpjoern 标准），fallback 到 code_step
-            dep_func_name = dep_node.get(NODE_NAME) or self.analyzer.code_step.get_node_code(dep_node)
-            # 如果仍然是 NOT_SUPPORT 开头的，尝试第一个子节点的 code
-            if dep_func_name and dep_func_name.startswith('NOT_SUPPORT'):
-                dep_func_name = dep_node.get(NODE_NAME, 'unknown_func')
-            dep_file = self.analyzer.fig_step.get_belong_file(dep_node)
-            # 如果找不到源文件路径，跳过此节点（避免读取空路径）
-            if not dep_file:
-                logger.info(f"    [resolve_func_def] {i+1}/{len(all_dep_nodes)} '{dep_func_name}' - no file, skipped")
-                continue
-            lineno_range = (dep_node[NODE_LINENO], dep_node[NODE_ENDLINENO])
-            dep_lines = self.cat_lines_from_file(dep_file, lineno_range)
-            dep_code = "\n".join(dep_lines)
-            if dep_node[NODE_TYPE] in {TYPE_METHOD, TYPE_STATIC}:
-                dep_code = re.sub(r'^\s*(public|protected|private)\s+', '', dep_code)
-                dep_code = re.sub(r'^\s*(static)\s+', '', dep_code)
-            # 跳过 handle_undefined_dims/vars 和 handle_nonlocal_functions
-            # 这些处理在大型项目上极慢（每次都做全局 Cypher 查询）
-            # 对于 function_definition.php，函数体直接从源文件复制即可
-            # fuzzer 会通过 GET 参数注入需要的值
-            dep_code = re.sub(r'(\$?[\w\[\'"\]\(\)]+->)+(\w+\s*\()', r'\2', dep_code)
-            dep_code = re.sub(r'(\$?[\w\[\'"\]\(\)]+->)+([\w\[\'"\]]+)', r'$\2', dep_code)
-            dep_code = re.sub(r'([\$?\w\[\'"\]\(\)]+::)+(\w+\s*\()', r'\2', dep_code)
-            dep_code = re.sub(r'(\$?[\w\[\'"\]\(\)]+::)+([\w\[\'"\]]+)', f'{generate_temporary_var()}', dep_code)
-            dep_code = re.sub(r'(\\\w+)+\\', '', dep_code)
-            dep_code = re.sub(r'\$this([^\w])', rf'{generate_temporary_var()}\1', dep_code)
-            dep_code = re.sub(r'mixed\s+\$', '$', dep_code)
-            # 跳过 handle_global_defs（也有慢查询），直接输出函数定义
-            
-            elapsed = _t.time() - _t0
-            if elapsed > 1.0:
-                logger.warning(f"    [resolve_func_def] {i+1}/{len(all_dep_nodes)} '{dep_func_name}' SLOW: {elapsed:.1f}s")
+            name_node = self._call_name_node(call)
+            if name_node is None:
+                name_expr = self.analyzer.ast_step.get_ith_child_node(call, 1, ignore_error_flag=True)
+                if name_expr is None:
+                    continue
+                member_name = None
             else:
-                logger.info(f"    [resolve_func_def] {i+1}/{len(all_dep_nodes)} '{dep_func_name}' OK: {elapsed:.1f}s")
-            
-            if dep_code:
-                all_dep_code += dep_code
-                all_dep_code += "\n\n"
-        logger.info(f"    [resolve_func_def] done, generated {len(all_dep_code)} chars of PHP code")
-        return all_dep_code
+                name_expr = name_node
+                member_name = (name_node[NODE_CODE] or '').strip('"').strip("'")
+            bindings.append((call[NODE_TYPE], member_name, name_expr[NODE_INDEX],
+                             call[NODE_LINENO], self.member_call_symbol(call)))
+        edits.extend(source.member_edits(name_index, body_end, bindings))
+        edits.extend(source.normalization_edits(generate_temporary_var, first, body_end))
+        self._defined_names.add(php_symbol_key(name))
+        start, end = source.declaration_bounds(first, body_end)
+        return source.render(edits, start, end) + '\n\n'
 
     def run(self):
-        definition_code = ""
-        stub_code = ""
-        self._processed_decl_ids = set()  # 避免同一个函数被重复提取
-        self._defined_func_names = set()  # 记录已定义的函数名
-        self._stub_func_names = set()  # 记录需要生成 stub 的函数名
-        
-        for node_id in self.call_site_series:
-            call_node = self.analyzer.get_node_itself(node_id)
-            decl_nodes = self.analyzer.cg_step.find_decl_nodes(call_node)
-            if not decl_nodes:
-                # 如果通过 CALLS 边找不到声明，使用名称+参数数量匹配
-                decl_nodes = self.analyzer.cg_step.match_decl_nodes(call_node)
-            if decl_nodes:
-                for decl_node in decl_nodes:
-                    if decl_node[NODE_INDEX] in self._processed_decl_ids:
-                        continue  # 跳过已处理过的函数声明
-                    self._processed_decl_ids.add(decl_node[NODE_INDEX])
-                    func_code = self.resolve_function_definition(decl_node)
-                    definition_code += func_code
-                    # 记录已提取的函数名
-                    func_name = decl_node.get(NODE_NAME) or ''
-                    if func_name:
-                        self._defined_func_names.add(func_name)
-            else:
-                # 找不到声明：记录函数名，稍后生成 stub
-                if call_node[NODE_TYPE] == TYPE_CALL:
-                    func_name = self.analyzer.code_step.get_ast_call_code(call_node)
-                elif call_node[NODE_TYPE] == TYPE_STATIC_CALL:
-                    func_name = self.analyzer.code_step.get_ast_static_call_code(call_node)
-                else:
-                    func_name = None
-                if func_name and func_name not in PHP_BUILT_IN_FUNCTIONS:
-                    self._stub_func_names.add(func_name)
-        
-        # 为深层依赖中无法提取的函数也收集 stub 需求
-        # （resolve_function_definition 内部调用的函数如果超出 depth 也需要 stub）
-        # 这里通过扫描已生成代码中的函数调用来发现缺失函数
-        if definition_code:
-            import re as _re
-            # 先从真实定义代码中提取所有已定义的函数名
-            defined_in_code = set(_re.findall(r'^\s*function\s+([a-zA-Z_]\w*)\s*\(', definition_code, _re.MULTILINE))
-            self._defined_func_names.update(defined_in_code)
-            
-            # 匹配函数调用模式 funcname(
-            called_in_defs = set(_re.findall(r'\b([a-zA-Z_]\w*)\s*\(', definition_code))
-            # PHP 保留字（不能作为函数名，生成 stub 会导致语法错误）
-            php_reserved = {'function', 'if', 'elseif', 'else', 'while', 'for', 'foreach', 
-                           'switch', 'case', 'default', 'break', 'continue', 'return',
-                           'global', 'static', 'new', 'class', 'interface', 'abstract', 
-                           'final', 'throw', 'catch', 'try', 'define', 'defined',
-                           'array', 'list', 'isset', 'empty', 'unset', 'echo', 'print',
-                           'true', 'false', 'null', 'and', 'or', 'xor', 'not',
-                           'die', 'exit', 'eval', 'include', 'require', 'include_once', 'require_once',
-                           'var', 'const', 'public', 'private', 'protected', 'extends', 'implements',
-                           'namespace', 'use', 'trait', 'yield', 'fn', 'match', 'enum',
-                           'int', 'float', 'string', 'bool', 'void', 'object', 'mixed',
-                           'self', 'parent', 'clone', 'instanceof'}
-            for called_name in called_in_defs:
-                if (called_name not in self._defined_func_names 
-                    and called_name not in PHP_BUILT_IN_FUNCTIONS
-                    and called_name not in php_reserved
-                    and not called_name[0].isupper()  # 排除类名（首字母大写）
-                    and len(called_name) > 1):  # 排除单字母
-                    self._stub_func_names.add(called_name)
-        
-        # 生成 stub 函数（统一返回第一个参数，保证 PHP 不崩）
-        for stub_name in sorted(self._stub_func_names):
-            if stub_name not in self._defined_func_names:
-                stub_code += f"function {stub_name}() {{ return func_num_args() > 0 ? func_get_arg(0) : null; }}\n\n"
-        
-        # 组合：先放 stub（被其他函数调用），再放真实定义
-        final_code = stub_code + definition_code
-        
-        # 添加 <?php ?> 标签，确保是合法 PHP 文件
-        if final_code.strip():
-            final_code = "<?php\n" + final_code + "?>\n"
-        
-        with open(os.path.join(self.def_storage_path, "function_definition.php"), "w") as f:
-            f.write(final_code)
-            f.flush()
+        calls = [self.analyzer.get_node_itself(node_id) for node_id in self.call_site_series]
+        self._register_global_calls(calls)
+        declarations = {}
+        for call in calls:
+            declaration = self._resolve_declaration(call)
+            if declaration is not None:
+                declarations[declaration[NODE_INDEX]] = declaration
+        # Only entry-path declarations are extracted. Calls inside them keep
+        # their binding, with a stub when the target is outside that depth.
+        for declaration in declarations.values():
+            self._register_global_calls(self._get_body_calls(declaration))
+        for call in calls:
+            if call[NODE_TYPE] != TYPE_CALL:
+                self.member_call_symbol(call)
+
+        definitions = ''.join(self.resolve_function_definition(node) for node in declarations.values())
+        stubs = ''.join(
+            f"function {name}() {{ return func_num_args() > 0 ? func_get_arg(0) : null; }}\n\n"
+            for key, name in sorted(self._required_names.items()) if key not in self._defined_names
+        )
+        code = stubs + definitions
+        with open(os.path.join(self.def_storage_path, "function_definition.php"), "w") as file:
+            if code:
+                file.write("<?php\n" + code + "?>\n")
