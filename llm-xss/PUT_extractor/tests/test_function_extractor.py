@@ -15,8 +15,8 @@ import py2neo
 
 import PUT_extractor
 from core.neo4j_engine.const import (
-    TYPE_CALL, TYPE_ECHO, TYPE_FUNC_DECL, TYPE_METHOD, TYPE_METHOD_CALL,
-    TYPE_STATIC_CALL, php_symbol_key,
+    FLAG_BINARY_BOOL_AND, TYPE_BINARY_OP, TYPE_CALL, TYPE_ECHO, TYPE_FUNC_DECL,
+    TYPE_METHOD, TYPE_METHOD_CALL, TYPE_STATIC_CALL, php_symbol_key,
 )
 from core.neo4j_engine.steps import ASTStep, CGStep, CodeStep
 
@@ -36,6 +36,8 @@ class FixtureGraph:
             self.nodes = {}
             for row in rows:
                 props = {key.split(':')[0]: value for key, value in row.items() if value}
+                if 'flags' in props:
+                    props['flags'] = props['flags'].split(',')
                 node_id = int(props.pop('id'))
                 node = py2neo.Node(props.pop('labels'), id=str(node_id), **props)
                 node.identity = node_id
@@ -121,11 +123,11 @@ class FunctionExtractorTest(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.output = storage / 'PUT' / 'fixture' / '1'
 
-    def generate(self):
+    def generate(self, entry_nodes=None):
         steps = {
             'Neo4jEngine.from_dict': self.graph,
             'Neo4jConnectorCenter.from_map': {},
-            'load_taint_flow': [self.graph.entry_nodes()],
+            'load_taint_flow': [self.graph.entry_nodes() if entry_nodes is None else entry_nodes],
             'sink_context_analysis': ('', ''),
         }
         with ExitStack() as stack:
@@ -199,6 +201,14 @@ class FunctionExtractorTest(unittest.TestCase):
         index, definitions = self.generate()
         self.assertIn(f'{symbol}_(', index)
         self.assertIn(f'function {symbol}_(', definitions)
+
+    def test_comparison_as_output_expression(self):
+        comparison = next(node for node in self.graph.nodes.values()
+                          if node['type'] == TYPE_BINARY_OP and FLAG_BINARY_BOOL_AND in node['flags'])
+        index, _ = self.generate([int(comparison['id'])])
+        self.assertIn('echo((("ready" == "ready") && (1 > 0)));', index)
+        result = subprocess.run([PHP, 'index.php'], cwd=self.output, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout, '1')
 
 
 if __name__ == '__main__':

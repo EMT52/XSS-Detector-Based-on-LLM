@@ -13,6 +13,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 
@@ -264,6 +265,43 @@ def publish(run, paths):
     save_json(flow_file, paths)
 
 
+def archive_failed_puts(puts, failed_puts, lint_log, destination):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination.parent, prefix=f'.{destination.name}-') as temp:
+        archive = Path(temp) / 'archive'
+        archive.mkdir(mode=0o700)
+        shutil.copyfile(lint_log, archive / lint_log.name)
+        for put_id in sorted(failed_puts):
+            source = puts / put_id
+            for php_file in source.rglob('*.php'):
+                output = archive / put_id / php_file.relative_to(source)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(php_file, output.with_suffix('.php.txt'))
+        archive.rename(destination)
+
+
+def lint_puts(php, puts, lint_log, archive=None):
+    lint = []
+    lint_error = None
+    failed_puts = set()
+    for p in sorted(puts.rglob('*.php')):
+        result = subprocess.run([php, '-l', str(p)], capture_output=True, text=True, timeout=30)
+        lint.append(result.stdout + result.stderr)
+        if result.returncode:
+            failed_puts.add(p.relative_to(puts).parts[0])
+            if lint_error is None:
+                diagnostic = result.stderr.strip() or result.stdout.strip()
+                lint_error = (f'生成的 PHP 语法错误：{p}；不发布本批次\n'
+                              f'PHP 检查退出码 {result.returncode}；日志：{lint_log}\n'
+                              f'{diagnostic}').rstrip()
+    lint_log.write_text(''.join(lint))
+    if lint_error is not None:
+        if archive is not None:
+            archive_failed_puts(puts, failed_puts, lint_log, archive)
+        raise RuntimeError(lint_error)
+    return len(lint)
+
+
 def prepare(args, run, manifest):
     print('[环境检查] 检查 PHP、Java、Python 依赖及 Neo4j 配置', flush=True)
     java_home, php, home, auth, config = preflight(args)
@@ -293,11 +331,14 @@ def prepare(args, run, manifest):
     # manual workflow; absolute includes and file-based CPG lookups depend on it.
     text = command([php, ROOT / 'phpjoern/src/Parser.php', args.app], cpg,
                    run / '01-phpjoern.log', env, args.timeout, args.verbose)
-    if re.search(r'\[ERROR\]|Fatal error|Parse error', text, re.I):
-        raise RuntimeError('PHP 解析器报告错误；查看 01-phpjoern.log')
-    raw_counts = {}
-    for name in ('nodes.csv', 'rels.csv'):
-        raw_counts[name] = raw_csv_count(cpg / name)
+    parse_error_count = len(re.findall(r'^\[ERROR\] In ', text, re.M))
+    manifest['php_parse_error_count'] = parse_error_count
+    raw_counts = {name: raw_csv_count(cpg / name) for name in ('nodes.csv', 'rels.csv')}
+    if min(raw_counts.values()) <= 0:
+        raise RuntimeError('PHP 解析器未生成可用的 AST；查看 01-phpjoern.log')
+    if parse_error_count:
+        print(f'  [警告] {parse_error_count} 个 PHP 文件解析失败并已跳过，继续分析其余文件。'
+              '详见 01-phpjoern.log', flush=True)
     print(f'[1/6 完成] AST 节点 {raw_counts["nodes.csv"]}，AST 关系 {raw_counts["rels.csv"]}', flush=True)
     print(f'  产物：{cpg / "nodes.csv"}、{cpg / "rels.csv"}', flush=True)
     print('[2/6] TChecker 静态分析', flush=True)
@@ -408,18 +449,11 @@ def prepare(args, run, manifest):
             raise RuntimeError('PUT 数量或文件不完整；查看 06-extractor.log')
         for i in expected:
             print(f'  PUT {i}：index.php、function_definition.php 文件完整', flush=True)
-        lint = []
-        for p in sorted(puts.rglob('*.php')):
-            result = subprocess.run([php, '-l', str(p)], capture_output=True, text=True,
-                                    timeout=30)
-            lint.append(result.stdout + result.stderr)
-            if result.returncode:
-                (run / '06-php-lint.log').write_text(''.join(lint))
-                raise RuntimeError(f'生成的 PHP 语法错误：{p}；不发布本批次')
-        (run / '06-php-lint.log').write_text(''.join(lint))
+        archive = None if args.no_publish else EXTRACTOR / 'storage/failed_puts' / run.name
+        lint_count = lint_puts(php, puts, run / '06-php-lint.log', archive)
         manifest['put_count'] = len(actual)
-        manifest['php_files_linted'] = len(lint)
-        print(f'[6/6 完成] {len(actual)} 个 PUT，{len(lint)} 个 PHP 文件语法检查全部通过', flush=True)
+        manifest['php_files_linted'] = lint_count
+        print(f'[6/6 完成] {len(actual)} 个 PUT，{lint_count} 个 PHP 文件语法检查全部通过', flush=True)
         print(f'  PUT 目录：{puts}', flush=True)
     finally:
         command([db / 'bin/neo4j', 'stop'], run, run / '04-stop.log', env, 90, args.verbose)

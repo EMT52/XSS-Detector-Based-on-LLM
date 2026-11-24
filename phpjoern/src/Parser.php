@@ -238,8 +238,11 @@ function parse_dir( $path, $exporter, $top = true) : int {
   while( false !== ($filename = readdir( $dhandle))) {
     $finfo = new SplFileInfo( build_path( $path, $filename));
 
-    if( $finfo->isFile() && $finfo->isReadable() && in_array( strtolower( $finfo->getExtension()), ['php','inc','phar']))
-      $found[] = parse_file( $finfo->getPathname(), $exporter);
+    if( $finfo->isFile() && $finfo->isReadable() && in_array( strtolower( $finfo->getExtension()), ['php','inc','phar'])) {
+      $filenode = parse_file( $finfo->getPathname(), $exporter);
+      if( $filenode !== -1)
+        $found[] = $filenode;
+    }
     else if( $finfo->isDir() && $finfo->isReadable() && $filename !== '.' && $filename !== '..')
       if( -1 !== ($childdir = parse_dir( $finfo->getPathname(), $exporter, false)))
         $found[] = $childdir;

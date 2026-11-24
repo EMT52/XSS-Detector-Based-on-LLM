@@ -35,3 +35,5 @@ echo (new UPLOADHANDLER())->qUeRy();
 echo uPloAdHaNdlEr::sEnD('');
 echo sEnD('');
 echo (new UploadHandler())->iNpuT(null);
+
+('ready' == 'ready') && (1 > 0);
