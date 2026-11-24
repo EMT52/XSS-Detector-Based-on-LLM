@@ -1,0 +1,10 @@
+{
+  "php-app": {
+    "NEO4J_HOST": "localhost",
+    "NEO4J_PORT": 7474,
+    "NEO4J_USERNAME": "neo4j",
+    "NEO4J_PASSWORD": "1",
+    "NEO4J_DATABASE": "neo4j",
+    "NEO4J_PROTOCOL": "http"
+  }
+}

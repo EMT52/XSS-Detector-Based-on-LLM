@@ -1,0 +1,96 @@
+#!/opt/python/bin/python3
+"""Container commands; prepare/fuzz execute the original project entry points."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(os.environ.get('XSS_ROOT', '/workspace/XSS')).resolve()
+WEB = ROOT / '.docker-state/www'
+
+
+def rebuild():
+    checker = ROOT / 'TChecker'
+    source_roots = [checker / 'projects/extensions' / name / 'src/main/java'
+                    for name in ('jpanlib', 'joern-php')]
+    sources = sorted(p for base in source_roots for p in base.rglob('*.java'))
+    jars = [checker / path for path in (
+        'lib/antlr4-runtime-4.5.3.jar',
+        'ApacheCommons/commons-cli-1.4/commons-cli-1.4.jar',
+        'ApacheCommons/commons-csv-1.8-bin/commons-csv-1.8/commons-csv-1.8.jar',
+        'ApacheCommons/commons-lang3-3.10/commons-lang3-3.10.jar',
+        'ApacheCommons/json-20190722.jar')]
+    missing = [str(p) for p in jars if not p.is_file()]
+    if missing or not sources:
+        raise RuntimeError('Missing TChecker source/jars: ' + ', '.join(missing))
+    fingerprint = hashlib.sha256()
+    for path in [*sources, *jars]:
+        fingerprint.update(str(path.relative_to(checker)).encode())
+        fingerprint.update(path.read_bytes())
+    digest = fingerprint.hexdigest()
+    output = checker / 'bin'
+    stamp = output / '.docker-source-sha256'
+    if (output / 'tools/php/ast2cpg/Main.class').is_file() and stamp.is_file() and stamp.read_text() == digest:
+        return
+    # Compile into a fresh directory. A failed compilation leaves previous classes intact.
+    with tempfile.TemporaryDirectory(prefix='.compile-', dir=checker) as temporary:
+        target = Path(temporary) / 'bin'
+        target.mkdir()
+        argfile = Path(temporary) / 'sources.txt'
+        argfile.write_text('\n'.join('"' + str(p).replace('\\', '\\\\').replace('"', '\\"') + '"'
+                                     for p in sources) + '\n')
+        java_home = Path(os.environ.get('JAVA_HOME', '/usr/lib/jvm/java-11-openjdk-amd64'))
+        subprocess.run([str(java_home / 'bin/javac'), '-encoding', 'UTF-8', '--release', '11',
+                        '-cp', os.pathsep.join(map(str, jars)), '-d', str(target), '@' + str(argfile)], check=True)
+        import shutil
+        # Only the generated bin directory is replaced; source and dependencies are retained.
+        if output.exists():
+            shutil.rmtree(output)
+        target.rename(output)
+        stamp.write_text(digest)
+    print('TChecker compiled from current source.', flush=True)
+
+
+def main(args):
+    action, *extra = args or ['help']
+    if action == 'rebuild':
+        rebuild()
+        return 0
+    if action in ('prepare', 'check'):
+        rebuild()
+        command = [sys.executable, str(ROOT / 'scripts/prepare_step7.py'),
+                   '--web-root', str(WEB), '--java-heap', os.environ.get('JAVA_HEAP', '2G')]
+        if action == 'check':
+            command.append('--check-only')
+        return subprocess.call(command + extra, cwd=ROOT)
+    if action == 'fuzz':
+        if not (WEB / 'php-app').is_dir():
+            raise RuntimeError('Run xss prepare successfully before fuzzing.')
+        # This web root is dedicated to this pipeline; unrelated host sites are not scanned.
+        return subprocess.call([sys.executable, 'PUT_fuzzer.py', '--test_path', str(WEB), *extra],
+                               cwd=ROOT / 'llm-xss/PUT_fuzzer')
+    if action == 'smoke':
+        return subprocess.call([sys.executable, str(Path(__file__).with_name('smoke.py'))], cwd=ROOT)
+    if action == 'versions':
+        for command in (['php', '-v'], ['java', '-version'], ['python3', '--version'],
+                        ['/opt/chrome/chrome', '--version'],
+                        ['/usr/local/bin/chromedriver/chromedriver', '--version']):
+            subprocess.run(command, check=True)
+        flavor = Path('/usr/local/share/xss/php-flavor').read_text().strip()
+        print(json.dumps({'php_flavor': flavor, 'instrumentation_verified': False}))
+        return 0
+    if action == 'shell':
+        os.execvp('bash', ['bash', *extra])
+    print('Usage: xss {prepare|check|fuzz|rebuild|smoke|versions|shell} [arguments]')
+    return 0 if action == 'help' else 2
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

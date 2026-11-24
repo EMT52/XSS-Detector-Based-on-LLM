@@ -1,0 +1,23 @@
+services:
+  lab:
+    image: ${XSS_IMAGE:-ghcr.io/emt52/xss-detector-based-on-llm:latest}
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        PHP_FLAVOR: ${PHP_FLAVOR:-standard}
+    init: true
+    shm_size: 1gb
+    ports:
+      - "127.0.0.1:${XSS_HTTP_PORT:-8080}:80"
+    environment:
+      XSS_UID: ${XSS_UID:-1000}
+      XSS_GID: ${XSS_GID:-1000}
+      JAVA_HEAP: ${JAVA_HEAP:-2G}
+      XSS_NEO4J_PASSWORD: ${XSS_NEO4J_PASSWORD:-1}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - .:/workspace/XSS
+      - ./docker:/usr/local/lib/xss:ro
+    stop_grace_period: 30s

@@ -1,0 +1,38 @@
+{
+  "python": {
+    "version": "3.10.22",
+    "url": "https://www.python.org/ftp/python/3.10.22/Python-3.10.22.tar.xz",
+    "sha256": "c61fe9b1a1a7ec2a0b0388e664187c378a5325a89e3606d220abf5bdfccb2543",
+    "bytes": 19907500
+  },
+  "php": {
+    "version": "7.0.33",
+    "url": "https://museum.php.net/php7/php-7.0.33.tar.xz",
+    "sha256": "ab8c5be6e32b1f8d032909dedaaaa4bbb1a209e519abb01a52ce3914f9a13d96",
+    "bytes": 12033040
+  },
+  "php_ast": {
+    "version": "701e8539e0a861b8fe3c0144a7554c376f42efe3",
+    "url": "https://codeload.github.com/nikic/php-ast/tar.gz/701e8539e0a861b8fe3c0144a7554c376f42efe3",
+    "sha256": "cbf9b040eeb2b97d919557c60b526f76588a3c58bcd46c885541789423bae535",
+    "bytes": 30071
+  },
+  "neo4j": {
+    "version": "4.4.37",
+    "url": "https://dist.neo4j.org/neo4j-community-4.4.37-unix.tar.gz",
+    "sha256": "1df748bf54206d4cbf2c9e19bab9c43120df054f466469c93099afd41c3f2cd8",
+    "bytes": 122981651
+  },
+  "chrome": {
+    "version": "158.0.8127.36",
+    "url": "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/linux64/chrome-linux64.zip",
+    "sha256": "dba9cc838e1ce269c33ea68170881127bd15d078fc3ca5891c90802819a4d7c7",
+    "bytes": 208062943
+  },
+  "chromedriver": {
+    "version": "158.0.8127.36",
+    "url": "https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.36/linux64/chromedriver-linux64.zip",
+    "sha256": "d20e70d69d68c5c983e2526452ed0779fd65dc4ade5d6741f1bb3d0d82754d3a",
+    "bytes": 14835848
+  }
+}
