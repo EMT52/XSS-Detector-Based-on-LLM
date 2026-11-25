@@ -32,6 +32,14 @@ class LLMPayloadMixin:
         'claude': 'Anthropic Claude',
         'local': 'Local Model (Ollama/LM Studio)'
     }
+    MAX_OUTPUT_TOKENS = 18192
+    MODEL_OUTPUT_LIMITS = {
+        ('qwen', 'qwen-max'): 8192,
+        ('ernie', 'ernie-4.0-8k'): 2048,
+        ('zhipu', 'glm-4'): 8192,
+        ('openai', 'gpt-4'): 8192,
+        ('claude', 'claude-3-opus-20240229'): 4096,
+    }
     
     def __init__(self, 
                  provider: str = 'qwen',
@@ -54,6 +62,12 @@ class LLMPayloadMixin:
         
         # 设置默认模型
         self.model = model or self._get_default_model()
+        self.max_output_tokens = min(
+            self.MAX_OUTPUT_TOKENS,
+            self.MODEL_OUTPUT_LIMITS.get(
+                (self.provider, self.model.lower()), self.MAX_OUTPUT_TOKENS
+            ),
+        )
         
         # 验证配置
         if not self.api_key and self.provider != 'local':
@@ -429,7 +443,7 @@ class LLMPayloadMixin:
             },
             "parameters": {
                 "temperature": 0.7,
-                "max_tokens": 2000
+                "max_tokens": self.max_output_tokens
             }
         }
         
@@ -472,7 +486,7 @@ class LLMPayloadMixin:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
-            "max_output_tokens": 2000
+            "max_output_tokens": self.max_output_tokens
         }
         
         try:
@@ -499,7 +513,7 @@ class LLMPayloadMixin:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": self.max_output_tokens
         }
         
         try:
@@ -526,7 +540,7 @@ class LLMPayloadMixin:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": self.max_output_tokens
         }
         
         try:
@@ -553,7 +567,7 @@ class LLMPayloadMixin:
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": self.max_output_tokens
         }
         
         try:
@@ -576,7 +590,7 @@ class LLMPayloadMixin:
         
         data = {
             "model": self.model,
-            "max_tokens": 2000,
+            "max_tokens": self.max_output_tokens,
             "messages": [
                 {"role": "user", "content": prompt}
             ]
@@ -597,7 +611,8 @@ class LLMPayloadMixin:
         data = {
             "model": self.model,
             "prompt": prompt,
-            "stream": False
+            "stream": False,
+            "options": {"num_predict": self.max_output_tokens}
         }
         
         try:

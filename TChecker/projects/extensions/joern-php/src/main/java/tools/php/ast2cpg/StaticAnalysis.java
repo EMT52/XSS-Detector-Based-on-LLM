@@ -58,8 +58,7 @@ public class StaticAnalysis  {
 	public static Set<Stack<Long>> vulPaths = new HashSet<Stack<Long>>();
 	public static Long ID = null;
 	public static MultiHashMap<String, Long> name2Stmt = new MultiHashMap<String, Long>();
-	//we only step into the function 
-	public static MultiHashMap<String, Long> name2Func = new MultiHashMap<String, Long>();
+	private final HashMap<Long, Set<String>> propertiesByFunction = new HashMap<>();
 	public static MultiHashMap<Long, Long> caller2callee = new MultiHashMap<Long, Long>();
 	public static MultiHashMap<Long, Long> callee2caller = new MultiHashMap<Long, Long>();
 	public static HashSet<Long> validFunc = new HashSet<Long>();
@@ -88,6 +87,7 @@ public class StaticAnalysis  {
 	private static ThreadLocal<Set<Long>> traverseCallStack = ThreadLocal.withInitial(HashSet::new);
 	private static ThreadLocal<Integer> recursionDepth = ThreadLocal.withInitial(() -> 0);
 	private static final int MAX_RECURSION_DEPTH = 5000;
+	private static final String UNKNOWN_PROPERTY = "-2";
 
 	// ===== 璋冭瘯杈撳嚭寮€鍏?=====
 	// 涓?false 鏃跺彧杈撳嚭鏈€缁堢殑 JSON 缁撴灉锛屼笉杈撳嚭浠讳綍璋冭瘯淇℃伅銆?
@@ -224,7 +224,7 @@ public class StaticAnalysis  {
 					srcGlobalSet.add(tmp);
 					Long funcID = stmtNode.getFuncId();
 					String iden = getDIMIdentity(ASTUnderConstruction.idToNode.get(dim));
-					name2Func(iden, funcID);
+					registerPropertyUse(iden, funcID);
 				}
 				else {
 					srcDim.add(stmt, tmp);
@@ -237,7 +237,7 @@ public class StaticAnalysis  {
 					dstGlobal.add(stmt, tmp1);
 					Long funcID = stmtNode.getFuncId();
 					String iden = getDIMIdentity(ASTUnderConstruction.idToNode.get(dim));
-					name2Func(iden, funcID);
+					registerPropertyUse(iden, funcID);
 				}
 			}
 		}
@@ -263,7 +263,7 @@ public class StaticAnalysis  {
 					//get the function of prop
 					Long funcID = stmtNode.getFuncId();
 					String iden = getPropIdentity(ASTUnderConstruction.idToNode.get(prop), (long) 0);
-					name2Func(iden, funcID);
+					registerPropertyUse(iden, funcID);
 				}
 				//it is a function call
 				else if(stmtNode instanceof CallExpressionBase) {
@@ -271,7 +271,7 @@ public class StaticAnalysis  {
 					srcPropSet.add(prop);
 					Long funcID = stmtNode.getFuncId();
 					String iden = getPropIdentity(ASTUnderConstruction.idToNode.get(prop), (long) 0);
-					name2Func(iden, funcID);
+					registerPropertyUse(iden, funcID);
 				}
 				//it is a return node
 				else if(stmtNode instanceof ReturnStatement) {
@@ -279,7 +279,7 @@ public class StaticAnalysis  {
 					srcPropSet.add(prop);
 					Long funcID = stmtNode.getFuncId();
 					String iden = getPropIdentity(ASTUnderConstruction.idToNode.get(prop), (long) 0);
-					name2Func(iden, funcID);
+					registerPropertyUse(iden, funcID);
 				}
 			} catch(Exception e){
 				//System.err.println("Unknown assignment: "+stmt);
@@ -460,15 +460,31 @@ public class StaticAnalysis  {
 		}
 	}
 
-	private void name2Func(String inter, Long func) {
-		if(!inter.contains("::")) {
+	private void registerPropertyUse(String property, Long function) {
+		if (!property.contains("::")) {
 			return;
 		}
-		HashSet<Long> related = getAllcaller(func);
-		for(Long relate: related) {
-			//prop identity => function
-			name2Func.add(inter, relate);
+		for (Long caller : getAllcaller(function)) {
+			propertiesByFunction.computeIfAbsent(caller, id -> new HashSet<>()).add(property);
 		}
+	}
+
+	private boolean usesTrackedProperty(Long function, Set<String> trackedProperties) {
+		Set<String> properties = propertiesByFunction.get(function);
+		if (properties == null) {
+			return false;
+		}
+		for (String tracked : trackedProperties) {
+			for (String property : properties) {
+				if (check(tracked, property)) {
+					if (DEBUG) {
+						System.out.println("Property match: " + property + " " + name2Stmt.get(property) + " " + function);
+					}
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 	
 	//get all function called the input function
@@ -1402,20 +1418,7 @@ public class StaticAnalysis  {
 							Long nextId = (long) -1;
 							//the param is not tainted
 							if(intro.isEmpty()) {
-								boolean flag = false;
-								for(String inter: node.inter.keySet()) {
-									//the inter variables are used in the function or not
-									for(String key: name2Func.keySet()) {
-										//find the key
-										if(key.equals(inter) || check(inter, key)==true) {
-											if(name2Func.get(key).contains(func)) {
-												if(DEBUG) System.out.println("name2Func: "+key+" "+name2Stmt.get(key)+" "+name2Func.get(key));
-												flag=true;
-												break;
-											}
-										}
-									}
-								}
+									boolean flag = usesTrackedProperty(func, node.inter.keySet());
 								//the function defines source
 								HashSet<Long> src = new HashSet<Long>(node.inter.values());
 								//the function defines source statement
@@ -1668,7 +1671,8 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 						if(targetFuncs==null || targetFuncs.isEmpty()) {
 							//remove tainted variables
 							if(related.keySet().isEmpty()) {
-								Set<String> unrelated = RemoveInterTaint(stmt, caller, node.inter);
+								// Resolve the assigned property in the current function's context.
+								Set<String> unrelated = RemoveInterTaint(stmt, topCaller, node.inter);
 								HashMap<String, Long> newInter = null;
 								//remove unrelated global variables and properties
 								if(!unrelated.isEmpty()) {
@@ -2022,20 +2026,7 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 							Long nextId = (long) -1;
 							if(intro.isEmpty()) {
 								HashMap<String, Long> inter1 = node.inter;
-								boolean flag = false;
-								for(String interName: node.inter.keySet()) {
-									//the inter variables are used in the function
-									for(String key: name2Func.keySet()) {
-										//find the key
-										if(key.equals(interName) || check(interName, key)==true) {
-											if(name2Func.get(key).contains(func)) {
-												if(DEBUG) System.out.println("name2Func: "+key+" "+name2Stmt.get(key)+" "+name2Func.get(key));
-												flag=true;
-												break;
-											}
-										}
-									}
-								}
+									boolean flag = usesTrackedProperty(func, node.inter.keySet());
 								//the function defines source
 								HashSet<Long> src = new HashSet<Long>(node.inter.values());
 								//the function defines source statement
@@ -2347,19 +2338,7 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 									if(contains==true) {
 										continue;
 									}
-									boolean flag = false;
-									for(String inter1: node.inter.keySet()) {
-										//the inter variables are used in the function or not
-										for(String key: name2Func.keySet()) {
-											//find the key
-											if(key.equals(inter1) || check(inter1, key)==true) {
-												if(name2Func.get(key).contains(func)) {
-													flag=true;
-													break;
-												}
-											}
-										}
-									}
+									boolean flag = usesTrackedProperty(func, node.inter.keySet());
 									//the function defines source
 									HashSet<Long> src = new HashSet<Long>(node.inter.values());
 									//the function defines source statement
@@ -3026,9 +3005,6 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 	 * @return: a set of unrelated global variables and properties 
 	 */
 	private Set<String> RemoveInterTaint(Long stmt, Long caller, HashMap<String, Long> inter) {
-		if(ID2Node.containsKey(caller)) {
-			caller = ID2Node.get(caller).astId;
-		}
 		Set<String> ret = new HashSet<String>();
 		//global variable is assigned
 		if(dstGlobal.containsKey(stmt)) {
@@ -3052,9 +3028,11 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 			for(Long exp: dstExps) {
 				ASTNode propNode = ASTUnderConstruction.idToNode.get(exp);
 				String propName = getPropIdentity(propNode, caller);
+				if (UNKNOWN_PROPERTY.equals(propName)) {
+					continue;
+				}
 				for(String interTaint: inter.keySet()) {
-					if(check(propName, interTaint)) {
-						//inter.remove(interTaint);
+					if (!UNKNOWN_PROPERTY.equals(interTaint) && check(propName, interTaint)) {
 						ret.add(interTaint);
 					}
 				}
@@ -3088,22 +3066,6 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 	 * @@return: the taint variable in stmts and and its corresponding related statements  
 	 */
 	private HashMap<Long, Long> isrelated(Long stmt, Set<Long> intro, HashMap<String, Long> inter, Long caller) {
-		if(ID2Node.containsKey(caller)) {
-			caller = ID2Node.get(caller).astId;
-		}
-		
-		ASTNode stmtnode = ASTUnderConstruction.idToNode.get(caller);
-		
-		if(stmtnode instanceof AssignmentExpression && ((AssignmentExpression) stmtnode).getRight() instanceof CallExpressionBase) {
-			CallExpressionBase callsite = (CallExpressionBase) ((AssignmentExpression) stmtnode).getRight();
-			caller = callsite.getNodeId();
-		}
-		
-		ASTNode stmtNode1 = ASTUnderConstruction.idToNode.get(caller);
-		if(!(stmtNode1 instanceof CallExpressionBase)) {
-			caller = (long) 0;
-		}
-			
 		HashMap<Long, Long> relatedNodes = new HashMap<Long, Long>();
 		
 		//check intro-data flow relationship
@@ -3285,7 +3247,7 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 	//get the identity of property variable
 	/*
 	 * @param: propert ast ID, caller
-	 * @return: the identity of the property. e.g., $a->b=>astnode(a)::b; returns -1 if cannot get the identity
+	 * @return: the identity of the property, e.g. astnode(a)::b for $a->b, or UNKNOWN_PROPERTY
 	 */
 	private String getPropIdentity(ASTNode node, Long caller) {
 		if(node instanceof PropertyExpression) {
@@ -3354,32 +3316,30 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 				propValue = propNode.getEscapedCodeStr();
 			}
 			//the prop name is a variable and it is assigned by the parameter
-			else if(propNode.getProperty("type").equals("AST_VAR")) {
-				//get the variable name of prop
-				String varName = ((Variable) propNode).getNameExpression().getEscapedCodeStr();
-				//get prop variable's function
-				FunctionDef currentFunc = (FunctionDef) ASTUnderConstruction.idToNode.get(propNode.getFuncId());
-				ParameterList paramList = currentFunc.getParameterList();
-				//we do not know the property name
-				if(paramList==null) {
-					if(DEBUG) System.out.println("null param: "+currentFunc.getNodeId());
-					return "-2";
+			else if (propNode instanceof Variable && caller != 0L) {
+				ASTNode callerNode = ASTUnderConstruction.idToNode.get(caller);
+				if (callerNode instanceof AssignmentExpression) {
+					callerNode = ((AssignmentExpression) callerNode).getRight();
+				} else if (callerNode instanceof ReturnStatement) {
+					callerNode = ((ReturnStatement) callerNode).getReturnExpression();
 				}
-				for(int i=0; i<paramList.size(); i++) {
-					Parameter param = (Parameter) paramList.getParameter(i);
-					String paramName = param.getName();
-					//i'th param name is equal to prop's variable name
-					if(paramName.equals(varName) && caller!=0) {
-						CallExpressionBase callerNode = (CallExpressionBase) ASTUnderConstruction.idToNode.get(caller);
-						ArgumentList argList = (ArgumentList) callerNode.getArgumentList();
-						//get the i'th argument value
-						if(i>=argList.size()) {
-							break;
+				ASTNode function = ASTUnderConstruction.idToNode.get(propNode.getFuncId());
+				if (!(callerNode instanceof CallExpressionBase) || !(function instanceof FunctionDef)) {
+					return UNKNOWN_PROPERTY;
+				}
+				ArgumentList arguments = ((CallExpressionBase) callerNode).getArgumentList();
+				ParameterList parameters = ((FunctionDef) function).getParameterList();
+				if (arguments == null || parameters == null) {
+					return UNKNOWN_PROPERTY;
+				}
+				String varName = ((Variable) propNode).getNameExpression().getEscapedCodeStr();
+				for (int i = 0; i < Math.min(parameters.size(), arguments.size()); i++) {
+					if (parameters.getParameter(i).getName().equals(varName)) {
+						Expression argument = arguments.getArgument(i);
+						if ("string".equals(argument.getProperty("type"))) {
+							propValue = argument.getEscapedCodeStr();
 						}
-						Expression arg = argList.getArgument(i);
-						if(arg.getProperty("type").equals("string")) {
-							propValue = arg.getEscapedCodeStr();
-						}
+						break;
 					}
 				}
 			}
@@ -3389,7 +3349,7 @@ nextNode = mergeNode(next, returnIntro, exit.inter, stack);
 				return objValue+"::"+propValue;
 			}
 		}
-		return "-2";
+		return UNKNOWN_PROPERTY;
 	}
 	
 	//get the identity of DIM variable
