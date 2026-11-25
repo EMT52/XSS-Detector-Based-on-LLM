@@ -5,7 +5,7 @@ LLM增强XSS测试模块。
 """
 
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 
 from .llm_payload import LLMPayloadMixin
@@ -21,6 +21,12 @@ class LLMEnhancedTester(
     LLMVerifyMixin,
 ):
     """向后兼容的 LLM 增强测试器。"""
+
+
+def _with_failed_response(result: Dict, llm_tester: Optional[LLMEnhancedTester]) -> Dict:
+    if llm_tester is not None and isinstance(llm_tester._llm_response, str):
+        result["failed_response"] = llm_tester._llm_response
+    return result
 
 
 def llm_enhanced_test(tester, 
@@ -48,6 +54,7 @@ def llm_enhanced_test(tester,
     Returns:
         测试结果字典
     """
+    llm_tester = None
     try:
         # 初始化LLM测试器
         llm_tester = LLMEnhancedTester(
@@ -69,7 +76,7 @@ def llm_enhanced_test(tester,
         
         if not custom_payloads:
             logger.warning("No custom payloads generated")
-            return llm_tester._build_no_payload_result()
+            return _with_failed_response(llm_tester._build_no_payload_result(), llm_tester)
         
         # 测试定制payload
         found, successful_payload, test_count = llm_tester.test_custom_payloads(
@@ -92,13 +99,14 @@ def llm_enhanced_test(tester,
         logger.error(f"LLM enhanced test failed: {e}")
         import traceback
         traceback.print_exc()
-        return {
+        result = {
             "vulnerability_found": False,
             "successful_payload": None,
             "custom_payloads_generated": 0,
             "custom_payloads_tested": 0,
             "error": str(e)
         }
+        return _with_failed_response(result, llm_tester)
 
 
 def llm_static_analysis_test(tester,
@@ -125,6 +133,7 @@ def llm_static_analysis_test(tester,
     """
     logger.info(f"[LLM Static] Starting static analysis test for {test_put_path}")
     
+    llm_tester = None
     try:
         # 初始化LLM测试器
         llm_tester = LLMEnhancedTester(
@@ -172,7 +181,9 @@ def llm_static_analysis_test(tester,
         
         if not custom_payloads:
             logger.warning("[LLM Static] No payloads generated")
-            return llm_tester._build_no_payload_result(static_analysis)
+            return _with_failed_response(
+                llm_tester._build_no_payload_result(static_analysis), llm_tester,
+            )
         
         logger.info(f"[LLM Static] Generated {len(custom_payloads)} payloads, starting tests...")
         
@@ -203,12 +214,13 @@ def llm_static_analysis_test(tester,
         logger.error(f"[LLM Static] Test failed: {e}")
         import traceback
         traceback.print_exc()
-        return {
+        result = {
             "vulnerability_found": False,
             "successful_payload": None,
             "custom_payloads_generated": 0,
             "custom_payloads_tested": 0,
             "error": str(e)
         }
+        return _with_failed_response(result, llm_tester)
 
 

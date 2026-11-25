@@ -1,11 +1,14 @@
 import os
 import json
 import copy
+import logging
 import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 def print_nested_dict(d, indent=0, file=None):
     if file is None:
@@ -59,6 +62,13 @@ def record_llm_result(results, test_put_path, llm_result, provider, error=None):
     }
     if llm_error:
         details["error"] = llm_error
+    failed_response = llm_data.get("failed_response")
+    if status == "error" and failed_response is not None:
+        details["failed_response"] = failed_response
+        logger.warning(
+            "[LLM] Detection failed for %r. Error=%r Response=%r",
+            test_put_path, llm_error, failed_response,
+        )
     entry = {
         "test_count": standard_count + tested,
         "standard_result": standard_result,

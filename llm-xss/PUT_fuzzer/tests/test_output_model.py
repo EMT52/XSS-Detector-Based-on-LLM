@@ -7,7 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from requests import Response
+
 from models import output_model
+from models.llm_enhanced_model import LLMEnhancedTester, llm_enhanced_test
 
 
 def run_results(vulnerable=None, safe=None, duration=1):
@@ -119,6 +122,28 @@ class LLMResultTests(unittest.TestCase):
         entry = self.results["safe_files"][self.path]
         self.assertEqual(entry["llm_details"]["error"], "API connection failed")
         self.assertFalse(entry["llm_tested"])
+
+    def test_empty_model_content_preserves_original_http_body(self):
+        body = '{"choices":[{"message":{"content":""},"finish_reason":"length"}]}'
+        response = Response()
+        response.status_code = 200
+        response._content = body.encode("utf-8")
+        with (
+            patch("models.llm_payload.requests.post", return_value=response),
+            patch.object(LLMEnhancedTester, "analyze_php_code", return_value={}),
+            patch.object(LLMEnhancedTester, "_build_llm_prompt", return_value=""),
+            patch.object(LLMEnhancedTester, "test_custom_payloads") as verify,
+            self.assertLogs("models.output_model", level="WARNING") as logs,
+        ):
+            result = llm_enhanced_test(None, self.path, {}, provider="deepseek", api_key="mock")
+            self.record(result)
+
+        verify.assert_not_called()
+        details = self.results["safe_files"][self.path]["llm_details"]
+        self.assertEqual(details["status"], "error")
+        self.assertEqual(details["failed_response"], body)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(repr(body), logs.output[0])
 
     def test_missing_result_is_an_error(self):
         self.record(None)

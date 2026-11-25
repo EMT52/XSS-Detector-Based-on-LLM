@@ -19,9 +19,12 @@ import ast.expressions.PropertyExpression;
 import ast.expressions.Variable;
 import ast.functionDef.ParameterBase;
 import ast.functionDef.ParameterList;
+import ast.php.expressions.CoalesceExpression;
+import ast.php.expressions.EncapsListExpression;
 import ast.php.expressions.ExitExpression;
 import ast.php.expressions.IncludeOrEvalExpression;
 import ast.php.expressions.MethodCallExpression;
+import ast.php.expressions.PrintExpression;
 import ast.php.expressions.StaticCallExpression;
 import ast.php.functionDef.FunctionDef;
 import ast.php.functionDef.Method;
@@ -33,6 +36,7 @@ import cg.PHPCGFactory;
 import cg.ParseVar;
 import cg.toTopLevelFile;
 import ddg.DataDependenceGraph.DDG;
+import inputModules.csv.PHPCSVNodeTypes;
 import inputModules.csv.csv2ast.ASTUnderConstruction;
 import misc.MultiHashMap;
 import misc.Pair;
@@ -69,6 +73,7 @@ public class StaticAnalysis  {
 	public static HashSet<Long> loop = new HashSet<Long>();
 	public static HashSet<Long> forloop = new HashSet<Long>();
 	public static MultiHashMap<Long, Long> srcStmt = new MultiHashMap<Long, Long>();
+	private final Set<Long> directOutputStatements = new HashSet<>();
 	public static HashMap<Long, Integer> loopsize = new HashMap<Long, Integer>(); 
 	public static HashSet<Long> allTargets = new HashSet<Long>();
 	public static HashMap<Long, HashMap<String, Long>> addInter = new HashMap<Long, HashMap<String, Long>>(); 
@@ -425,8 +430,15 @@ public class StaticAnalysis  {
 			if(dir.contains("test") || dir.contains("Test")) {
 				continue;
 			}
+			Long stmt = getStatement(src);
+			if(stmt == null) {
+				continue;
+			}
+			if(isDirectOutputSource(src, stmt)) {
+				directOutputStatements.add(stmt);
+			}
 			if(isSource(src)) {
-				srcStmt.add(getStatement(src), src);
+				srcStmt.add(stmt, src);
 				sourceFunc(src, srcNode.getFuncId());
 			}
 		}
@@ -532,6 +544,34 @@ public class StaticAnalysis  {
 			}
 			return ret;
 		}
+	}
+
+	private boolean isDirectOutputSource(Long source, Long stmt) {
+		ASTNode output = ASTUnderConstruction.idToNode.get(stmt);
+		if(!(output instanceof EchoStatement || output instanceof PrintExpression)) {
+			return false;
+		}
+
+		// Follow expressions that carry the request value into the output.
+		Long child = source;
+		while(!stmt.equals(child)) {
+			Long parent = PHPCSVEdgeInterpreter.child2parent.get(child);
+			if(stmt.equals(parent)) {
+				return true;
+			}
+			ASTNode expression = ASTUnderConstruction.idToNode.get(parent);
+			if(expression instanceof ArrayIndexing) {
+				Expression array = ((ArrayIndexing) expression).getArrayExpression();
+				if(array == null || !child.equals(array.getNodeId())) {
+					return false;
+				}
+			} else if(!(expression instanceof CoalesceExpression || expression instanceof EncapsListExpression
+					|| (expression != null && PHPCSVNodeTypes.FLAG_BINARY_CONCAT.equals(expression.getFlags())))) {
+				return false;
+			}
+			child = parent;
+		}
+		return false;
 	}
 
 	//check if the source is a taint variable
@@ -751,6 +791,12 @@ public class StaticAnalysis  {
 			//the function exits here
 			//check if the statement has been sanitized
 			boolean valid = isvalid(stmt);
+			if(valid && directOutputStatements.contains(stmt) && !sum.containsKey(stmt)) {
+				// A single statement is both the source and the sink.
+				Stack<Long> path = new Stack<>();
+				path.push(stmt);
+				sum.put(stmt, path);
+			}
 			Long topCaller;
 			if(node.caller==null || node.caller.isEmpty()) {
 				topCaller = (long) 0;

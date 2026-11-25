@@ -50,6 +50,7 @@ class LLMPayloadMixin:
         self.provider = provider.lower()
         self.api_key = api_key or os.getenv(f"{provider.upper()}_API_KEY")
         self.api_base = api_base
+        self._llm_response: Optional[str] = None
         
         # 设置默认模型
         self.model = model or self._get_default_model()
@@ -229,6 +230,7 @@ class LLMPayloadMixin:
         Returns:
             定制化payload列表
         """
+        self._llm_response = None
         logger.info(f"Generating custom payloads using {self.provider}...")
         
         # 构建prompt
@@ -402,6 +404,11 @@ class LLMPayloadMixin:
             return self._call_local_api(prompt)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
+
+    def _read_llm_response(self, response: requests.Response) -> Dict:
+        self._llm_response = response.text
+        response.raise_for_status()
+        return response.json()
     
     def _call_qwen_api(self, prompt: str) -> str:
         """调用通义千问API"""
@@ -428,8 +435,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             
             # 通义千问的响应格式: result['output']['text']
             if 'output' in result and 'text' in result['output']:
@@ -471,8 +477,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result['result']
         except Exception as e:
             logger.error(f"ERNIE API call failed: {e}")
@@ -499,8 +504,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result['choices'][0]['message']['content']
         except Exception as e:
             logger.error(f"Zhipu API call failed: {e}")
@@ -527,8 +531,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result['choices'][0]['message']['content']
         except Exception as e:
             logger.error(f"DeepSeek API call failed: {e}")
@@ -555,8 +558,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result['choices'][0]['message']['content']
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
@@ -582,8 +584,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result['content'][0]['text']
         except Exception as e:
             logger.error(f"Claude API call failed: {e}")
@@ -601,8 +602,7 @@ class LLMPayloadMixin:
         
         try:
             response = requests.post(url, json=data, timeout=120)
-            response.raise_for_status()
-            result = response.json()
+            result = self._read_llm_response(response)
             return result.get('response', '')
         except Exception as e:
             logger.error(f"Local API call failed: {e}")
@@ -791,6 +791,7 @@ class LLMPayloadMixin:
         Returns:
             payload列表
         """
+        self._llm_response = None
         logger.info("[LLM Static] Generating payloads from static analysis...")
         
         # 构建专门的prompt

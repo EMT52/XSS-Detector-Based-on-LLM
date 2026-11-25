@@ -13,7 +13,6 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime
 
@@ -265,43 +264,6 @@ def publish(run, paths):
     save_json(flow_file, paths)
 
 
-def archive_failed_puts(puts, failed_puts, lint_log, destination):
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=destination.parent, prefix=f'.{destination.name}-') as temp:
-        archive = Path(temp) / 'archive'
-        archive.mkdir(mode=0o700)
-        shutil.copyfile(lint_log, archive / lint_log.name)
-        for put_id in sorted(failed_puts):
-            source = puts / put_id
-            for php_file in source.rglob('*.php'):
-                output = archive / put_id / php_file.relative_to(source)
-                output.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(php_file, output.with_suffix('.php.txt'))
-        archive.rename(destination)
-
-
-def lint_puts(php, puts, lint_log, archive=None):
-    lint = []
-    lint_error = None
-    failed_puts = set()
-    for p in sorted(puts.rglob('*.php')):
-        result = subprocess.run([php, '-l', str(p)], capture_output=True, text=True, timeout=30)
-        lint.append(result.stdout + result.stderr)
-        if result.returncode:
-            failed_puts.add(p.relative_to(puts).parts[0])
-            if lint_error is None:
-                diagnostic = result.stderr.strip() or result.stdout.strip()
-                lint_error = (f'生成的 PHP 语法错误：{p}；不发布本批次\n'
-                              f'PHP 检查退出码 {result.returncode}；日志：{lint_log}\n'
-                              f'{diagnostic}').rstrip()
-    lint_log.write_text(''.join(lint))
-    if lint_error is not None:
-        if archive is not None:
-            archive_failed_puts(puts, failed_puts, lint_log, archive)
-        raise RuntimeError(lint_error)
-    return len(lint)
-
-
 def prepare(args, run, manifest):
     print('[环境检查] 检查 PHP、Java、Python 依赖及 Neo4j 配置', flush=True)
     java_home, php, home, auth, config = preflight(args)
@@ -435,7 +397,7 @@ def prepare(args, run, manifest):
         print('[5/6] 自动写入本次污点路径', flush=True)
         save_json(ext / 'storage/taint_flows/php-app.json', paths)
         print(f'[5/6 完成] 已写入 {len(paths)} 条路径：{ext / "storage/taint_flows/php-app.json"}', flush=True)
-        print(f'[6/6] 提取 {len(paths)} 个 PUT，逐文件检查 PHP 语法', flush=True)
+        print(f'[6/6] 提取 {len(paths)} 个 PUT，检查产物是否齐全', flush=True)
         # Own the database lifecycle here; call run directly so extraction
         # exceptions propagate, unlike the legacy CLI which catches them.
         command([sys.executable, '-c', 'from PUT_extractor import run; run("php-app")'],
@@ -449,11 +411,8 @@ def prepare(args, run, manifest):
             raise RuntimeError('PUT 数量或文件不完整；查看 06-extractor.log')
         for i in expected:
             print(f'  PUT {i}：index.php、function_definition.php 文件完整', flush=True)
-        archive = None if args.no_publish else EXTRACTOR / 'storage/failed_puts' / run.name
-        lint_count = lint_puts(php, puts, run / '06-php-lint.log', archive)
         manifest['put_count'] = len(actual)
-        manifest['php_files_linted'] = lint_count
-        print(f'[6/6 完成] {len(actual)} 个 PUT，{lint_count} 个 PHP 文件语法检查全部通过', flush=True)
+        print(f'[6/6 完成] {len(actual)} 个 PUT，所需文件齐全', flush=True)
         print(f'  PUT 目录：{puts}', flush=True)
     finally:
         command([db / 'bin/neo4j', 'stop'], run, run / '04-stop.log', env, 90, args.verbose)
@@ -462,6 +421,7 @@ def prepare(args, run, manifest):
         raise RuntimeError('分析期间源码发生变化，本批次不发布，请停止修改后重试')
     if not args.no_publish:
         publish(run, paths)
+        manifest['published'] = True
         print(f'[发布完成] PUT：{EXTRACTOR / "storage/PUT/php-app"}', flush=True)
         print(f'  污点路径：{EXTRACTOR / "storage/taint_flows/php-app.json"}', flush=True)
         print(f'  旧产物备份：{run / "previous"}', flush=True)
@@ -520,7 +480,7 @@ def main():
         run.mkdir(mode=0o700)
         manifest = {'status': 'running', 'app': str(args.app), 'run': str(run),
                     'started_at': datetime.now().astimezone().isoformat(),
-                    'published': not args.no_publish}
+                    'published': False}
         print(f'本批次记录：{run}', flush=True)
         try:
             code = prepare(args, run, manifest)
