@@ -262,7 +262,7 @@ class LLMPayloadMixin:
             
         except Exception as e:
             logger.error(f"LLM API call failed: {e}")
-            return []
+            raise
     
     def _build_llm_prompt(self, analysis: Dict, standard_payloads: List[str], max_payloads: int) -> str:
         """构建发送给LLM的prompt"""
@@ -422,7 +422,10 @@ class LLMPayloadMixin:
     def _read_llm_response(self, response: requests.Response) -> Dict:
         self._llm_response = response.text
         response.raise_for_status()
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as e:
+            raise ValueError(f"LLM response JSON parsing failed: {e}") from e
     
     def _call_qwen_api(self, prompt: str) -> str:
         """调用通义千问API"""
@@ -472,8 +475,8 @@ class LLMPayloadMixin:
         
         try:
             token_response = requests.get(token_url, timeout=30)
-            token_response.raise_for_status()
-            access_token = token_response.json()['access_token']
+            access_token = self._read_llm_response(token_response)['access_token']
+            self._llm_response = None
         except Exception as e:
             logger.error(f"Failed to get ERNIE access token: {e}")
             raise
@@ -628,6 +631,10 @@ class LLMPayloadMixin:
         解析LLM输出，提取payload列表
         支持多种输出格式
         """
+        if not isinstance(llm_output, str):
+            raise ValueError("LLM response content must be a string")
+        if not llm_output.strip():
+            raise ValueError("LLM response content is empty")
         payloads = []
         
         # 策略1: 直接JSON解析
@@ -676,8 +683,7 @@ class LLMPayloadMixin:
             logger.info(f"Parsed {len(payloads)} payloads using line-by-line strategy")
             return payloads
         
-        logger.warning("Failed to parse LLM output, returning empty list")
-        return []
+        raise ValueError("LLM response content could not be parsed into payloads")
     
     def _static_code_analysis(self, php_code: str, function_code: str = "") -> Dict:
         """
@@ -824,7 +830,7 @@ class LLMPayloadMixin:
         
         except Exception as e:
             logger.error(f"[LLM Static] Failed to generate payloads: {e}")
-            return []
+            raise
     
     def _build_static_analysis_prompt(self, analysis: Dict, max_payloads: int) -> str:
         """构建静态分析的LLM prompt"""

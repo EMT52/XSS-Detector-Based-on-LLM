@@ -115,8 +115,21 @@ previous results.
 Use `--output output/php-app.json` to choose a separate output file for a project
 or concurrent run. Concurrent processes should use different output paths.
 
-For LLM follow-up tests, `standard_result` preserves the standard-stage result.
-`llm_details` records its own status, counts, and errors. A zero-payload test has
-`llm_tested: false`. The legacy `safe_files` group means no vulnerability was
-confirmed; entries with `status: "inconclusive"` are incomplete or failed tests,
-not evidence that the file is safe.
+Each PUT starts with `note`, followed by `payload` for confirmed findings, then
+`test_count` for the combined stage count. Findings use `Vulnerability found by
+standard test` or `Vulnerability found by LLM`. Other results use `No vulnerability
+found` or `Testing incomplete`.
+
+`standard_result` records the standard-stage count and any error. `LLM_result`
+records the provider, generated and tested payload counts, and any LLM error.
+Errors are recorded in their respective stages. The legacy `safe_files` group
+includes both negative and incomplete tests. Timeouts, context parsing failures,
+and stages with no tested payloads produce `Testing incomplete` when no finding
+is confirmed.
+
+Every unconfirmed LLM result includes `failed_response` with the full original
+API response body, including responses that generated payloads without a finding.
+When no response was received, this field is `null` and `error` records the
+request failure. Errors retain the exception type and message, including JSON
+parsing failures and empty model content. Historical reports whose response was
+never recorded also use `null`; their original response cannot be reconstructed.

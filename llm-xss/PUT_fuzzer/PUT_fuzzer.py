@@ -217,8 +217,8 @@ if __name__ =="__main__":
                             llm_found += 1
                             logger.info(f"[LLM] ✅ Vulnerability found in {test_put_path}")
                         else:
-                            logger.debug(f"[LLM] Status for {test_put_path}: "
-                                         f"{results['safe_files'][test_put_path]['llm_details']['status']}")
+                            logger.debug(f"[LLM] Result for {test_put_path}: "
+                                         f"{results['safe_files'][test_put_path]['note']}")
                     
                     except TimeoutError:
                         logging.warning(f"[LLM] A file LLM test exceeded timeout")

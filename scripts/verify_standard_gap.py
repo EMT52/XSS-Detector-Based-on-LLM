@@ -83,7 +83,7 @@ def main():
                 results = context(tester, enable_llm=False).test_put(str(fixture), results)
                 assert not results['vulnerable_files'], results
                 entry = results['safe_files'][str(fixture)]
-                assert entry['test_count'] == 0 and 'Could not parse context' in entry['note'], entry
+                assert entry['test_count'] == 0 and 'Could not parse context' in entry['error'], entry
                 assert not tester.get_error_files(), tester.error_details
                 standard_requests = request_count
                 standard_browsers = browser_count

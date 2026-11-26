@@ -433,7 +433,7 @@ class LLMVerifyMixin:
             "successful_payload": None,
             "custom_payloads_generated": 0,
             "custom_payloads_tested": 0,
-            "error": "No payloads generated",
+            "error": "LLM response contained no usable payloads",
         }
         if static_analysis is not None:
             result["static_analysis"] = static_analysis

@@ -107,8 +107,7 @@ class context:
             # 超时的文件标记为safe，等待后续的LLM批量测试
             results["safe_files"][test_put_path] = {
                 "test_count": 0,
-                "error": f"timeout_{timeout}s",
-                "note": "Standard test timed out, will be tested by LLM if enabled"
+                "error": f"timeout_{timeout}s"
             }
             return results
     
@@ -128,7 +127,7 @@ class context:
             from .config_model import unique_probe, fuzz_cases
             
             if not fuzz_cases:
-                return None
+                return {"error": "No fuzz cases available for LLM testing", "failed_response": None}
             
             context_db = None
             successful_fuzz_case_index = -1
@@ -194,13 +193,14 @@ class context:
             
         except Exception as e:
             logger.error(f"[LLM] Error in _try_llm_after_timeout: {e}")
-            return None
+            return {"error": f"{type(e).__name__}: {e}", "failed_response": None}
     
     def _test_put_impl(self, test_put_path, results, timeout=120):
         context = []
         vectors = {}
         max_test_count = 0  # 跟踪最大的 test_count
         found_context = False  # 标记是否找到过上下文
+        standard_error = None
 
         for fuzz_case in fuzz_cases:
             try:
@@ -235,18 +235,20 @@ class context:
                             
                             if vectors:
                                 results["vulnerable_files"][test_put_path] = {
-                                    "payload":vectors,
-                                    "test_count":test_count,
-                                    "method": "standard"
+                                    "note": "Vulnerability found by standard test",
+                                    "payload": vectors,
+                                    "test_count": test_count
                                 }
                                 return results
                         except Exception as e:
                             # attackgrammar 出错(如缺少 chromedriver),但仍然算作进行了测试
                             logger.debug(f"attackgrammar failed for {test_put_path}: {e}")
+                            standard_error = str(e) or type(e).__name__
                             max_test_count = max(max_test_count, 1)
             except Exception as e:
                 # test_filter 或 context_parser 出错,静默跳过
                 logger.debug(f"test_filter or context_parser failed: {e}")
+                standard_error = str(e) or type(e).__name__
                 pass
         
         # 标准测试结束，未找到漏洞
@@ -254,14 +256,15 @@ class context:
         if found_context:
             # 找到过上下文但没有漏洞
             results["safe_files"][test_put_path] = {
-                "test_count": max_test_count,
-                "note": "Standard test found no vulnerability, will be tested by LLM if enabled"
+                "test_count": max_test_count
             }
+            if standard_error:
+                results["safe_files"][test_put_path]["error"] = standard_error
         else:
             # 从未找到上下文
             results["safe_files"][test_put_path] = {
                 "test_count": 0,
-                "note": "Could not parse context, will be tested by LLM if enabled"
+                "error": standard_error or "Could not parse context"
             }
         
         return results

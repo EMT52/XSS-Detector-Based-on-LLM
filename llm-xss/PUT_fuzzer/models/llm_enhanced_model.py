@@ -24,8 +24,8 @@ class LLMEnhancedTester(
 
 
 def _with_failed_response(result: Dict, llm_tester: Optional[LLMEnhancedTester]) -> Dict:
-    if llm_tester is not None and isinstance(llm_tester._llm_response, str):
-        result["failed_response"] = llm_tester._llm_response
+    if not result.get("vulnerability_found"):
+        result["failed_response"] = getattr(llm_tester, "_llm_response", None)
     return result
 
 
@@ -86,7 +86,7 @@ def llm_enhanced_test(tester,
             context_info
         )
         
-        return llm_tester._build_enhanced_result(
+        result = llm_tester._build_enhanced_result(
             found,
             successful_payload,
             custom_payloads,
@@ -94,6 +94,7 @@ def llm_enhanced_test(tester,
             analysis,
             context_info,
         )
+        return _with_failed_response(result, llm_tester)
     
     except Exception as e:
         logger.error(f"LLM enhanced test failed: {e}")
@@ -104,7 +105,7 @@ def llm_enhanced_test(tester,
             "successful_payload": None,
             "custom_payloads_generated": 0,
             "custom_payloads_tested": 0,
-            "error": str(e)
+            "error": f"{type(e).__name__}: {e}"
         }
         return _with_failed_response(result, llm_tester)
 
@@ -149,13 +150,13 @@ def llm_static_analysis_test(tester,
                 php_code = f.read()
         except Exception as e:
             logger.error(f"Failed to read PHP file: {e}")
-            return {
+            return _with_failed_response({
                 "vulnerability_found": False,
                 "successful_payload": None,
                 "custom_payloads_generated": 0,
                 "custom_payloads_tested": 0,
-                "error": f"Failed to read file: {e}"
-            }
+                "error": f"Failed to read file: {type(e).__name__}: {e}"
+            }, llm_tester)
         
         # 读取函数定义文件
         function_def_path = test_put_path.replace("index.php", "function_definition.php")
@@ -208,7 +209,7 @@ def llm_static_analysis_test(tester,
         else:
             logger.info(f"[LLM Static] No vulnerability found after {test_count} tests")
         
-        return result
+        return _with_failed_response(result, llm_tester)
     
     except Exception as e:
         logger.error(f"[LLM Static] Test failed: {e}")
@@ -219,7 +220,7 @@ def llm_static_analysis_test(tester,
             "successful_payload": None,
             "custom_payloads_generated": 0,
             "custom_payloads_tested": 0,
-            "error": str(e)
+            "error": f"{type(e).__name__}: {e}"
         }
         return _with_failed_response(result, llm_tester)
 
